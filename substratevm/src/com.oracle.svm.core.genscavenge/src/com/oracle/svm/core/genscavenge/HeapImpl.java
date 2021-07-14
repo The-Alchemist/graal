@@ -94,8 +94,8 @@ public final class HeapImpl extends Heap {
     private final ObjectHeaderImpl objectHeaderImpl = new ObjectHeaderImpl();
     private final GCImpl gcImpl;
     private final RuntimeCodeInfoGCSupportImpl runtimeCodeInfoGcSupport;
-    private final HeapPolicy heapPolicy;
     private final ImageHeapInfo imageHeapInfo = new ImageHeapInfo();
+    private final HeapAccounting accounting = new HeapAccounting();
 
     /** Head of the linked list of currently pending (ready to be enqueued) {@link Reference}s. */
     private Reference<?> refPendingList;
@@ -114,7 +114,7 @@ public final class HeapImpl extends Heap {
     public HeapImpl(FeatureAccess access) {
         this.gcImpl = new GCImpl(access);
         this.runtimeCodeInfoGcSupport = new RuntimeCodeInfoGCSupportImpl();
-        this.heapPolicy = new HeapPolicy();
+        HeapPolicy.initialize();
         SubstrateDiagnostics.DiagnosticThunkRegister.getSingleton().register(new DumpHeapSettingsAndStatistics());
         SubstrateDiagnostics.DiagnosticThunkRegister.getSingleton().register(new DumpChunkInformation());
     }
@@ -220,6 +220,11 @@ public final class HeapImpl extends Heap {
         return runtimeCodeInfoGcSupport;
     }
 
+    @Fold
+    public HeapAccounting getAccounting() {
+        return accounting;
+    }
+
     GCImpl getGCImpl() {
         return gcImpl;
     }
@@ -252,11 +257,6 @@ public final class HeapImpl extends Heap {
         return result;
     }
 
-    @Fold
-    public HeapPolicy getHeapPolicy() {
-        return heapPolicy;
-    }
-
     @Uninterruptible(reason = "Called from uninterruptible code.", mayBeInlined = true)
     public YoungGeneration getYoungGeneration() {
         return youngGeneration;
@@ -273,7 +273,7 @@ public final class HeapImpl extends Heap {
 
     @Uninterruptible(reason = "Necessary to return a reasonably consistent value (a GC can change the queried values).")
     public UnsignedWord getUsedBytes() {
-        return getOldGeneration().getChunkBytes().add(HeapPolicy.getYoungUsedBytes());
+        return getOldGeneration().getChunkBytes().add(getHeapImpl().getAccounting().getYoungUsedBytes());
     }
 
     @Uninterruptible(reason = "Necessary to return a reasonably consistent value (a GC can change the queried values).")
@@ -809,6 +809,6 @@ final class Target_java_lang_Runtime {
 
     @Substitute
     private void gc() {
-        HeapPolicy.maybeCauseUserRequestedCollection();
+        GCImpl.getGCImpl().maybeCauseUserRequestedCollection();
     }
 }
