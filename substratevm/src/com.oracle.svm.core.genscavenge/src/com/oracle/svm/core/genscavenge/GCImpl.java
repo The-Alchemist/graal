@@ -566,7 +566,7 @@ public final class GCImpl implements GC {
              * Objects into each of the blackening methods, or even put them around individual
              * Object reference visits.
              */
-            prepareForPromotion(false);
+            prepareForPromotion();
 
             /*
              * Make sure all chunks with pinned objects are in toSpace, and any formerly pinned
@@ -590,14 +590,14 @@ public final class GCImpl implements GC {
             blackenImageHeapRoots();
 
             /* Visit all the Objects promoted since the snapshot. */
-            scanGreyObjects(false);
+            scanGreyObjects();
 
             if (DeoptimizationSupport.enabled()) {
                 /* Visit the runtime compiled code, now that we know all the reachable objects. */
                 walkRuntimeCodeCache();
 
                 /* Visit all objects that became reachable because of the compiled code. */
-                scanGreyObjects(false);
+                scanGreyObjects();
             }
 
             greyToBlackObjectVisitor.reset();
@@ -623,7 +623,7 @@ public final class GCImpl implements GC {
              * Objects into each of the blackening methods, or even put them around individual
              * Object reference visits.
              */
-            prepareForPromotion(true);
+            prepareForPromotion();
 
             /*
              * Make sure any released objects are in toSpace (because this is an incremental
@@ -656,14 +656,14 @@ public final class GCImpl implements GC {
             blackenDirtyImageHeapRoots();
 
             /* Visit all the Objects promoted since the snapshot, transitively. */
-            scanGreyObjects(true);
+            scanGreyObjects();
 
             if (DeoptimizationSupport.enabled()) {
                 /* Visit the runtime compiled code, now that we know all the reachable objects. */
                 walkRuntimeCodeCache();
 
                 /* Visit all objects that became reachable because of the compiled code. */
-                scanGreyObjects(true);
+                scanGreyObjects();
             }
 
             greyToBlackObjectVisitor.reset();
@@ -911,38 +911,25 @@ public final class GCImpl implements GC {
         }
     }
 
-    private static void prepareForPromotion(boolean isIncremental) {
+    private static void prepareForPromotion() {
         HeapImpl heap = HeapImpl.getHeapImpl();
-        OldGeneration oldGen = heap.getOldGeneration();
-        oldGen.prepareForPromotion();
-        if (isIncremental) {
-            heap.getYoungGeneration().prepareForPromotion();
-        }
+        heap.getOldGeneration().prepareForPromotion();
+        heap.getYoungGeneration().prepareForPromotion();
     }
 
-    private void scanGreyObjects(boolean isIncremental) {
-        HeapImpl heap = HeapImpl.getHeapImpl();
-        OldGeneration oldGen = heap.getOldGeneration();
-        Timer scanGreyObjectsTimer = timers.scanGreyObjects.open();
-        try {
-            if (isIncremental) {
-                scanGreyObjectsLoop();
-            } else {
-                oldGen.scanGreyObjects();
-            }
-        } finally {
-            scanGreyObjectsTimer.close();
-        }
-    }
-
-    private static void scanGreyObjectsLoop() {
+    private void scanGreyObjects() {
         HeapImpl heap = HeapImpl.getHeapImpl();
         YoungGeneration youngGen = heap.getYoungGeneration();
         OldGeneration oldGen = heap.getOldGeneration();
-        boolean hasGrey = true;
-        while (hasGrey) {
-            hasGrey = youngGen.scanGreyObjects();
-            hasGrey |= oldGen.scanGreyObjects();
+        Timer scanGreyObjectsTimer = timers.scanGreyObjects.open();
+        try {
+            boolean hasGrey;
+            do {
+                hasGrey = youngGen.scanGreyObjects();
+                hasGrey |= oldGen.scanGreyObjects();
+            } while (hasGrey);
+        } finally {
+            scanGreyObjectsTimer.close();
         }
     }
 
