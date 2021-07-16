@@ -110,7 +110,7 @@ public final class GCImpl implements GC {
     private final NoAllocationVerifier noAllocationVerifier = NoAllocationVerifier.factory("GCImpl.GCImpl()", false);
     private final ChunkReleaser chunkReleaser = new ChunkReleaser();
 
-    private final CollectionPolicy policy;
+    private final AbstractCollectionPolicy policy;
     private boolean completeCollection = false;
     private UnsignedWord sizeBefore = WordFactory.zero();
     private boolean collectionInProgress = false;
@@ -130,9 +130,9 @@ public final class GCImpl implements GC {
     public void maybeCollectOnAllocation() {
         boolean outOfMemory;
         if (hasNeverCollectPolicy()) {
-            outOfMemory = HeapImpl.getHeapImpl().getAccounting().getEdenUsedBytes().aboveThan(HeapParameters.getMaximumHeapSize());
+            outOfMemory = HeapImpl.getHeapImpl().getAccounting().getEdenUsedBytes().aboveThan(getPolicy().getMaximumHeapSize());
         } else {
-            outOfMemory = maybeCollectOnAllocation(HeapParameters.getMaximumYoungGenerationSize());
+            outOfMemory = maybeCollectOnAllocation(getPolicy().getMaximumYoungGenerationSize());
         }
         if (outOfMemory) {
             throw OUT_OF_MEMORY_ERROR;
@@ -257,7 +257,7 @@ public final class GCImpl implements GC {
         CommittedMemoryProvider.get().afterGarbageCollection(completeCollection);
 
         accounting.afterCollection(completeCollection, timers.collection);
-        UnsignedWord maxBytes = HeapParameters.getMaximumHeapSize();
+        UnsignedWord maxBytes = getPolicy().getMaximumHeapSize();
         UnsignedWord usedBytes = getChunkBytes();
         boolean outOfMemory = usedBytes.aboveThan(maxBytes);
 
@@ -324,9 +324,9 @@ public final class GCImpl implements GC {
         sizeBefore = ((SubstrateGCOptions.PrintGC.getValue() || HeapOptions.PrintHeapShape.getValue()) ? getChunkBytes() : WordFactory.zero());
         if (SubstrateGCOptions.VerboseGC.getValue() && getCollectionEpoch().equal(1)) {
             verboseGCLog.string("[Heap policy parameters: ").newline();
-            verboseGCLog.string("  YoungGenerationSize: ").unsigned(HeapParameters.getMaximumYoungGenerationSize()).newline();
-            verboseGCLog.string("      MaximumHeapSize: ").unsigned(HeapParameters.getMaximumHeapSize()).newline();
-            verboseGCLog.string("      MinimumHeapSize: ").unsigned(HeapParameters.getMinimumHeapSize()).newline();
+            verboseGCLog.string("  YoungGenerationSize: ").unsigned(getPolicy().getMaximumYoungGenerationSize()).newline();
+            verboseGCLog.string("      MaximumHeapSize: ").unsigned(getPolicy().getMaximumHeapSize()).newline();
+            verboseGCLog.string("      MinimumHeapSize: ").unsigned(getPolicy().getMinimumHeapSize()).newline();
             verboseGCLog.string("     AlignedChunkSize: ").unsigned(HeapParameters.getAlignedHeapChunkSize()).newline();
             verboseGCLog.string("  LargeArrayThreshold: ").unsigned(HeapParameters.getLargeArrayThreshold()).string("]").newline();
             if (HeapOptions.PrintHeapShape.getValue()) {
@@ -1075,7 +1075,7 @@ public final class GCImpl implements GC {
     }
 
     @Fold
-    public static CollectionPolicy getPolicy() {
+    public static AbstractCollectionPolicy getPolicy() {
         return GCImpl.getGCImpl().policy;
     }
 
@@ -1243,9 +1243,9 @@ public final class GCImpl implements GC {
         Log log = Log.log();
         final String prefix = "PrintGCSummary: ";
 
-        log.string(prefix).string("YoungGenerationSize: ").unsigned(HeapParameters.getMaximumYoungGenerationSize()).newline();
-        log.string(prefix).string("MinimumHeapSize: ").unsigned(HeapParameters.getMinimumHeapSize()).newline();
-        log.string(prefix).string("MaximumHeapSize: ").unsigned(HeapParameters.getMaximumHeapSize()).newline();
+        log.string(prefix).string("YoungGenerationSize: ").unsigned(getPolicy().getMaximumYoungGenerationSize()).newline();
+        log.string(prefix).string("MinimumHeapSize: ").unsigned(getPolicy().getMinimumHeapSize()).newline();
+        log.string(prefix).string("MaximumHeapSize: ").unsigned(getPolicy().getMaximumHeapSize()).newline();
         log.string(prefix).string("AlignedChunkSize: ").unsigned(HeapParameters.getAlignedHeapChunkSize()).newline();
 
         JavaVMOperation.enqueueBlockingSafepoint("PrintGCSummaryShutdownHook", ThreadLocalAllocation::disableAndFlushForAllThreads);
