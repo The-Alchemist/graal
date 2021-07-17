@@ -35,6 +35,7 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
+import org.graalvm.nativeimage.impl.ConfigurationPredicate;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -145,8 +146,8 @@ public class OmitPreviousConfigTests {
     }
 
     private static void doTestExpectedMissingTypes(TypeConfiguration typeConfig) {
-        Assert.assertNull(typeConfig.get("FlagTestA"));
-        Assert.assertNull(typeConfig.get("FlagTestB"));
+        Assert.assertNull(typeConfig.get(ConfigurationPredicate.DEFAULT_CONFIGURATION_PREDICATE, "FlagTestA"));
+        Assert.assertNull(typeConfig.get(ConfigurationPredicate.DEFAULT_CONFIGURATION_PREDICATE, "FlagTestB"));
     }
 
     private static void doTestTypeFlags(TypeConfiguration typeConfig) {
@@ -199,7 +200,7 @@ public class OmitPreviousConfigTests {
     }
 
     private static ConfigurationType getConfigTypeOrFail(TypeConfiguration typeConfig, String typeName) {
-        ConfigurationType type = typeConfig.get(typeName);
+        ConfigurationType type = typeConfig.get(ConfigurationPredicate.DEFAULT_CONFIGURATION_PREDICATE, typeName);
         Assert.assertNotNull(type);
         return type;
     }
@@ -261,7 +262,7 @@ class TypeMethodsWithFlagsTest {
     void populateConfig() {
         ConfigurationType oldType = new ConfigurationType(getTypeName());
         setFlags(oldType);
-        previousConfig.add(oldType);
+        previousConfig.add(ConfigurationPredicate.DEFAULT_CONFIGURATION_PREDICATE, oldType);
 
         ConfigurationType newType = new ConfigurationType(getTypeName());
         for (Map.Entry<ConfigurationMethod, ConfigurationMemberKind> methodEntry : methodsThatMustExist.entrySet()) {
@@ -270,7 +271,7 @@ class TypeMethodsWithFlagsTest {
         for (Map.Entry<ConfigurationMethod, ConfigurationMemberKind> methodEntry : methodsThatMustNotExist.entrySet()) {
             newType.addMethod(methodEntry.getKey().getName(), methodEntry.getKey().getInternalSignature(), methodEntry.getValue());
         }
-        currentConfig.add(newType);
+        currentConfig.add(ConfigurationPredicate.DEFAULT_CONFIGURATION_PREDICATE, newType);
     }
 
     void setFlags(ConfigurationType config) {
@@ -294,7 +295,7 @@ class TypeMethodsWithFlagsTest {
 
     void doTest() {
         String name = getTypeName();
-        ConfigurationType configurationType = currentConfig.get(name);
+        ConfigurationType configurationType = currentConfig.get(ConfigurationPredicate.DEFAULT_CONFIGURATION_PREDICATE, name);
         if (methodsThatMustExist.size() == 0) {
             Assert.assertNull("Generated configuration type " + name + " exists. Expected it to be cleared as it is empty.", configurationType);
         } else {

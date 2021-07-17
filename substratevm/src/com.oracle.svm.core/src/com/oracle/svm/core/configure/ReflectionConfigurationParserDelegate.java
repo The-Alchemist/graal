@@ -27,46 +27,39 @@ package com.oracle.svm.core.configure;
 import java.util.List;
 
 import com.oracle.svm.core.TypeResult;
+import org.graalvm.nativeimage.impl.ConfigurationPredicate;
 
 public interface ReflectionConfigurationParserDelegate<T> {
 
-    /**
-     * @deprecated use {@link #resolveTypeResult(String)} instead.
-     */
-    @Deprecated
-    default T resolveType(String typeName) {
-        return resolveTypeResult(typeName).get();
-    }
+    TypeResult<T> resolveTypeResult(ConfigurationPredicate predicate, String typeName);
 
-    TypeResult<T> resolveTypeResult(String typeName);
+    void registerType(ConfigurationPredicate predicate, T type);
 
-    void registerType(T type);
+    void registerPublicClasses(ConfigurationPredicate predicate, T type);
 
-    void registerPublicClasses(T type);
+    void registerDeclaredClasses(ConfigurationPredicate predicate, T type);
 
-    void registerDeclaredClasses(T type);
+    void registerPublicFields(ConfigurationPredicate predicate, T type);
 
-    void registerPublicFields(T type);
+    void registerDeclaredFields(ConfigurationPredicate predicate, T type);
 
-    void registerDeclaredFields(T type);
+    void registerPublicMethods(ConfigurationPredicate predicate, T type);
 
-    void registerPublicMethods(T type);
+    void registerDeclaredMethods(ConfigurationPredicate predicate, T type);
 
-    void registerDeclaredMethods(T type);
+    void registerPublicConstructors(ConfigurationPredicate predicate, T type);
 
-    void registerPublicConstructors(T type);
+    void registerDeclaredConstructors(ConfigurationPredicate predicate, T type);
 
-    void registerDeclaredConstructors(T type);
+    void registerField(ConfigurationPredicate predicate, T type, String fieldName, boolean allowWrite) throws NoSuchFieldException;
 
-    void registerField(T type, String fieldName, boolean allowWrite) throws NoSuchFieldException;
+    boolean registerAllMethodsWithName(ConfigurationPredicate predicate, T type, String methodName);
 
-    boolean registerAllMethodsWithName(T type, String methodName);
+    void registerMethod(ConfigurationPredicate predicate, T type, String methodName, List<T> methodParameterTypes) throws NoSuchMethodException;
 
-    void registerMethod(T type, String methodName, List<T> methodParameterTypes) throws NoSuchMethodException;
+    void registerConstructor(ConfigurationPredicate predicate, T type, List<T> methodParameterTypes) throws NoSuchMethodException;
 
-    void registerConstructor(T type, List<T> methodParameterTypes) throws NoSuchMethodException;
-
-    boolean registerAllConstructors(T type);
+    boolean registerAllConstructors(ConfigurationPredicate predicate, T type);
 
     String getTypeName(T type);
 

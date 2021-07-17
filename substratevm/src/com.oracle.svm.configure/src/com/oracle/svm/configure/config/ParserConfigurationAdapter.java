@@ -27,6 +27,7 @@ package com.oracle.svm.configure.config;
 import java.util.List;
 
 import com.oracle.svm.core.TypeResult;
+import org.graalvm.nativeimage.impl.ConfigurationPredicate;
 import com.oracle.svm.core.configure.ReflectionConfigurationParserDelegate;
 
 public class ParserConfigurationAdapter implements ReflectionConfigurationParserDelegate<ConfigurationType> {
@@ -38,81 +39,81 @@ public class ParserConfigurationAdapter implements ReflectionConfigurationParser
     }
 
     @Override
-    public TypeResult<ConfigurationType> resolveTypeResult(String typeName) {
-        ConfigurationType type = configuration.get(typeName);
+    public TypeResult<ConfigurationType> resolveTypeResult(ConfigurationPredicate predicate, String typeName) {
+        ConfigurationType type = configuration.get(predicate, typeName);
         ConfigurationType result = type != null ? type : new ConfigurationType(typeName);
         return TypeResult.forType(typeName, result);
     }
 
     @Override
-    public void registerType(ConfigurationType type) {
-        configuration.add(type);
+    public void registerType(ConfigurationPredicate predicate, ConfigurationType type) {
+        configuration.add(predicate, type);
     }
 
     @Override
-    public void registerField(ConfigurationType type, String fieldName, boolean finalButWritable) {
+    public void registerField(ConfigurationPredicate predicate, ConfigurationType type, String fieldName, boolean finalButWritable) {
         type.addField(fieldName, ConfigurationMemberKind.PRESENT, finalButWritable);
     }
 
     @Override
-    public boolean registerAllMethodsWithName(ConfigurationType type, String methodName) {
+    public boolean registerAllMethodsWithName(ConfigurationPredicate predicate, ConfigurationType type, String methodName) {
         type.addMethodsWithName(methodName, ConfigurationMemberKind.PRESENT);
         return true;
     }
 
     @Override
-    public boolean registerAllConstructors(ConfigurationType type) {
+    public boolean registerAllConstructors(ConfigurationPredicate predicate, ConfigurationType type) {
         type.addMethodsWithName(ConfigurationMethod.CONSTRUCTOR_NAME, ConfigurationMemberKind.PRESENT);
         return true;
     }
 
     @Override
-    public void registerMethod(ConfigurationType type, String methodName, List<ConfigurationType> methodParameterTypes) {
+    public void registerMethod(ConfigurationPredicate predicate, ConfigurationType type, String methodName, List<ConfigurationType> methodParameterTypes) {
         type.addMethod(methodName, ConfigurationMethod.toInternalParamsSignature(methodParameterTypes), ConfigurationMemberKind.PRESENT);
     }
 
     @Override
-    public void registerConstructor(ConfigurationType type, List<ConfigurationType> methodParameterTypes) {
+    public void registerConstructor(ConfigurationPredicate predicate, ConfigurationType type, List<ConfigurationType> methodParameterTypes) {
         type.addMethod(ConfigurationMethod.CONSTRUCTOR_NAME, ConfigurationMethod.toInternalParamsSignature(methodParameterTypes), ConfigurationMemberKind.PRESENT);
     }
 
     @Override
-    public void registerPublicClasses(ConfigurationType type) {
+    public void registerPublicClasses(ConfigurationPredicate predicate, ConfigurationType type) {
         type.setAllPublicClasses();
     }
 
     @Override
-    public void registerDeclaredClasses(ConfigurationType type) {
+    public void registerDeclaredClasses(ConfigurationPredicate predicate, ConfigurationType type) {
         type.setAllDeclaredClasses();
     }
 
     @Override
-    public void registerPublicFields(ConfigurationType type) {
+    public void registerPublicFields(ConfigurationPredicate predicate, ConfigurationType type) {
         type.setAllPublicFields();
     }
 
     @Override
-    public void registerDeclaredFields(ConfigurationType type) {
+    public void registerDeclaredFields(ConfigurationPredicate predicate, ConfigurationType type) {
         type.setAllDeclaredFields();
     }
 
     @Override
-    public void registerPublicMethods(ConfigurationType type) {
+    public void registerPublicMethods(ConfigurationPredicate predicate, ConfigurationType type) {
         type.setAllPublicMethods();
     }
 
     @Override
-    public void registerDeclaredMethods(ConfigurationType type) {
+    public void registerDeclaredMethods(ConfigurationPredicate predicate, ConfigurationType type) {
         type.setAllDeclaredMethods();
     }
 
     @Override
-    public void registerPublicConstructors(ConfigurationType type) {
+    public void registerPublicConstructors(ConfigurationPredicate predicate, ConfigurationType type) {
         type.setAllPublicConstructors();
     }
 
     @Override
-    public void registerDeclaredConstructors(ConfigurationType type) {
+    public void registerDeclaredConstructors(ConfigurationPredicate predicate, ConfigurationType type) {
         type.setAllDeclaredConstructors();
     }
 

@@ -41,21 +41,26 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import org.graalvm.nativeimage.hosted.Feature;
 import org.graalvm.nativeimage.hosted.Feature.DuringAnalysisAccess;
+import org.graalvm.nativeimage.impl.ConfigurationPredicate;
 import org.graalvm.nativeimage.impl.RuntimeReflectionSupport;
 
 import com.oracle.graal.pointsto.meta.AnalysisType;
+import com.oracle.svm.core.PredicatedConfigurationSupport;
+import com.oracle.svm.core.TypeResult;
 import com.oracle.svm.core.hub.ClassForNameSupport;
 import com.oracle.svm.core.hub.DynamicHub;
 import com.oracle.svm.core.jdk.RecordSupport;
 import com.oracle.svm.core.util.UserError;
 import com.oracle.svm.core.util.VMError;
+import com.oracle.svm.hosted.FeatureImpl;
 import com.oracle.svm.hosted.FeatureImpl.DuringAnalysisAccessImpl;
 import com.oracle.svm.hosted.FeatureImpl.FeatureAccessImpl;
 import com.oracle.svm.hosted.substitute.SubstitutionReflectivityFilter;
 import com.oracle.svm.util.ReflectionUtil;
 
-public class ReflectionDataBuilder implements RuntimeReflectionSupport {
+public class ReflectionDataBuilder extends PredicatedConfigurationSupport implements RuntimeReflectionSupport {
 
     public static final Field[] EMPTY_FIELDS = new Field[0];
     public static final Method[] EMPTY_METHODS = new Method[0];
@@ -70,7 +75,6 @@ public class ReflectionDataBuilder implements RuntimeReflectionSupport {
     private final Set<Executable> reflectionMethods = Collections.newSetFromMap(new ConcurrentHashMap<>());
     private final Set<Field> reflectionFields = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
-    /* Keep track of classes already processed for reflection. */
     private final Set<Class<?>> processedClasses = new HashSet<>();
 
     private final ReflectionDataAccessors accessors;
@@ -108,8 +112,12 @@ public class ReflectionDataBuilder implements RuntimeReflectionSupport {
     }
 
     @Override
-    public void register(Class<?>... classes) {
+    public void register(ConfigurationPredicate predicate, Class<?>... classes) {
         checkNotSealed();
+        registerPredicated(predicate, () -> registerClasses(classes));
+    }
+
+    private void registerClasses(Class<?>[] classes) {
         for (Class<?> clazz : classes) {
             if (reflectionClasses.add(clazz)) {
                 modifiedClasses.add(clazz);
@@ -118,8 +126,12 @@ public class ReflectionDataBuilder implements RuntimeReflectionSupport {
     }
 
     @Override
-    public void register(Executable... methods) {
+    public void register(ConfigurationPredicate predicate, Executable... methods) {
         checkNotSealed();
+        registerPredicated(predicate, () -> registerMethods(methods));
+    }
+
+    private void registerMethods(Executable[] methods) {
         for (Executable method : methods) {
             if (reflectionMethods.add(method)) {
                 modifiedClasses.add(method.getDeclaringClass());
@@ -128,8 +140,12 @@ public class ReflectionDataBuilder implements RuntimeReflectionSupport {
     }
 
     @Override
-    public void register(boolean finalIsWritable, Field... fields) {
+    public void register(ConfigurationPredicate predicate, boolean finalIsWritable, Field... fields) {
         checkNotSealed();
+        registerPredicated(predicate, () -> registerFields(fields));
+    }
+
+    private void registerFields(Field[] fields) {
         // Unsafe and write accesses are always enabled for fields because accessors use Unsafe.
         for (Field field : fields) {
             if (reflectionFields.add(field)) {
@@ -142,6 +158,11 @@ public class ReflectionDataBuilder implements RuntimeReflectionSupport {
         if (sealed) {
             throw UserError.abort("Too late to add classes, methods, and fields for reflective access. Registration must happen in a Feature before the analysis has finished.");
         }
+    }
+
+    @Override
+    protected TypeResult<Class<?>> findClass(Feature.BeforeAnalysisAccess b, String className) {
+        return ((FeatureImpl.BeforeAnalysisAccessImpl) b).getImageClassLoader().findClass(className);
     }
 
     protected void duringAnalysis(DuringAnalysisAccess a) {

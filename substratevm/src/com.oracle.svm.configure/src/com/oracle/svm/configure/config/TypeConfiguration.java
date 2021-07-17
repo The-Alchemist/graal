@@ -32,24 +32,27 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+import org.graalvm.collections.Pair;
+import org.graalvm.nativeimage.impl.ConfigurationPredicate;
+
 import com.oracle.svm.configure.ConfigurationBase;
 import com.oracle.svm.configure.json.JsonWriter;
 import com.oracle.svm.core.util.VMError;
 
 public class TypeConfiguration implements ConfigurationBase {
-    private final ConcurrentMap<String, ConfigurationType> types = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Pair<ConfigurationPredicate, String>, ConfigurationType> types = new ConcurrentHashMap<>();
 
     public TypeConfiguration() {
     }
 
     public TypeConfiguration(TypeConfiguration other) {
-        for (ConfigurationType configurationType : other.types.values()) {
-            types.put(configurationType.getQualifiedJavaName(), new ConfigurationType(configurationType));
+        for (Map.Entry<Pair<ConfigurationPredicate, String>, ConfigurationType> entry : other.types.entrySet()) {
+            types.put(entry.getKey(), new ConfigurationType(entry.getValue()));
         }
     }
 
     public void removeAll(TypeConfiguration other) {
-        for (Map.Entry<String, ConfigurationType> typeEntry : other.types.entrySet()) {
+        for (Map.Entry<Pair<ConfigurationPredicate, String>, ConfigurationType> typeEntry : other.types.entrySet()) {
             types.computeIfPresent(typeEntry.getKey(), (key, value) -> {
                 if (value.equals(typeEntry.getValue())) {
                     return null;
@@ -61,33 +64,47 @@ public class TypeConfiguration implements ConfigurationBase {
         }
     }
 
-    public ConfigurationType get(String qualifiedJavaName) {
-        return types.get(qualifiedJavaName);
+    public ConfigurationType get(ConfigurationPredicate predicate, String qualifiedJavaName) {
+        return types.get(Pair.create(predicate, qualifiedJavaName));
     }
 
-    public void add(ConfigurationType type) {
-        ConfigurationType previous = types.putIfAbsent(type.getQualifiedJavaName(), type);
+    public void add(ConfigurationPredicate predicate, ConfigurationType type) {
+        ConfigurationType previous = types.putIfAbsent(Pair.create(predicate, type.getQualifiedJavaName()), type);
         if (previous != null && previous != type) {
             VMError.shouldNotReachHere("Cannot replace existing type " + previous + " with " + type);
         }
     }
 
     public ConfigurationType getOrCreateType(String qualifiedForNameString) {
-        return types.computeIfAbsent(SignatureUtil.toInternalClassName(qualifiedForNameString), ConfigurationType::new);
+        ConfigurationPredicate predicate = ConfigurationPredicate.DEFAULT_CONFIGURATION_PREDICATE;
+        return types.computeIfAbsent(Pair.create(predicate, qualifiedForNameString), p -> new ConfigurationType(p.getRight()));
     }
 
     @Override
     public void printJson(JsonWriter writer) throws IOException {
+        List<Map.Entry<Pair<ConfigurationPredicate, String>, ConfigurationType>> list = new ArrayList<>(types.entrySet());
+        list.sort(Comparator.comparing(e -> e.getKey().getRight()));
+
         writer.append('[');
         String prefix = "";
-        List<ConfigurationType> list = new ArrayList<>(types.values());
-        list.sort(Comparator.comparing(ConfigurationType::getQualifiedJavaName));
-        for (ConfigurationType value : list) {
+        for (Map.Entry<Pair<ConfigurationPredicate, String>, ConfigurationType> value : list) {
             writer.append(prefix).newline();
-            value.printJson(writer);
+            writer.append('{').indent().newline();
+            printPredicateJson(value.getKey().getLeft(), writer);
+            value.getValue().printJson(writer);
+            writer.unindent().newline();
+            writer.append('}');
             prefix = ",";
         }
         writer.newline().append(']');
+    }
+
+    private static void printPredicateJson(ConfigurationPredicate predicate, JsonWriter writer) throws IOException {
+        if (!predicate.equals(ConfigurationPredicate.DEFAULT_CONFIGURATION_PREDICATE)) {
+            writer.append("\"predicate\":{");
+            writer.append("\"whenTypeReachable\":\"").append(predicate.getTypeReachability()).append("\"");
+            writer.append("},").newline();
+        }
     }
 
     @Override

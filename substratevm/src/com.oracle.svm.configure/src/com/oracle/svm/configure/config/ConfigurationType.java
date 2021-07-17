@@ -316,7 +316,6 @@ public class ConfigurationType implements JsonPrintable {
 
     @Override
     public void printJson(JsonWriter writer) throws IOException {
-        writer.append('{').indent().newline();
         writer.quote("name").append(':').quote(qualifiedJavaName);
         optionallyPrintJsonBoolean(writer, haveAllDeclaredFields(), "allDeclaredFields");
         optionallyPrintJsonBoolean(writer, haveAllPublicFields(), "allPublicFields");
@@ -337,8 +336,6 @@ public class ConfigurationType implements JsonPrintable {
                             Comparator.comparing(ConfigurationMethod::getName).thenComparing(Comparator.nullsFirst(Comparator.comparing(ConfigurationMethod::getInternalSignature))),
                             JsonPrintable::printJson);
         }
-        writer.unindent().newline();
-        writer.append('}');
     }
 
     private static void printField(Map.Entry<String, FieldInfo> entry, JsonWriter w) throws IOException {

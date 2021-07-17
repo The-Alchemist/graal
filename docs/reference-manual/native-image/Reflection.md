@@ -107,14 +107,15 @@ Here, `reflectconfig` is a JSON file in the following format (use `--expert-opti
       { "name" : "format", "parameterTypes" : ["java.lang.String", "java.lang.Object[]"] }
     ]
   },
-    {
-      "name" : "java.lang.String$CaseInsensitiveComparator",
-      "methods" : [
-        { "name" : "compare" }
-      ]
-    }
+  {
+    "name" : "java.lang.String$CaseInsensitiveComparator",
+    "methods" : [
+      { "name" : "compare" }
+    ]
+  }
 ]
 ```
+
 The native image builder generates reflection metadata for all classes, methods, and fields referenced in that file.
 The `allPublicConstructors`, `allDeclaredConstructors`, `allPublicMethods`, `allDeclaredMethods`, `allPublicFields`, `allDeclaredFields`, `allPublicClasses`, and `allDeclaredClasses` attributes can be used to automatically include an entire set of members of a class.
 
@@ -124,6 +125,28 @@ Code may also write non-static final fields like `String.value` in this example,
 
 More than one configuration can be used by specifying multiple paths for `ReflectionConfigurationFiles` and separating them with `,`.
 Also, `-H:ReflectionConfigurationResources` can be specified to load one or several configuration files from the native image build's class path, such as from a JAR file.
+
+### Predicated Configuration
+
+Each configuration entry is taken into account when a `predicate` is satisfied. The currently supported predicate is `whenTypeReachable` which enables the configuration entry when a provided type is reachable. For example, the reflectively access `sun.misc.Unsafe.theUnsafe` only when `io.netty.util.internal.PlatformDependent0` is used we write
+
+```json
+{
+  "predicate" : { "whenTypeReachable" : "io.netty.util.internal.PlatformDependent0" },
+  "name" : "sun.misc.Unsafe",
+  "fields" : [
+    { "name" : "theUnsafe" }
+  ]
+}
+```
+
+*Predicated configuration* is the *preferred* way to specify reflection configuration: Every reflective access must be done through some piece of code. If that code is not reachable it makes little sense to include the corresponding reflection entry. The consistant usage of `predicate` results in *smaller binaries* and *better build times* as the image builder can selectively include reflectivelly accessed code.
+
+If a `predicate` is omitted, the element is always included (i.e., Native Image will assume that the predicate is `java.lang.Object`). When the same predicate is used for two distinct elements in two configuration entries, both elements will be included when the predicate is satisfied. When the same configuration is predicated by two types, it is necessary to add two configuration entries (one for each predicate).
+
+When used with [assisted configuration](BuildConfiguration.md#assisted-configuration-of-native-image-builds), predicated entries of existing configuration will not be fused with collected entries. The collected entries will all have the default predicate `java.lang.Object` that will not be printed.
+
+### Confugration with Features
 
 Alternatively, a custom `Feature` implementation can register program elements before and during the analysis phase of the native image build using the `RuntimeReflection` class. For example:
 ```java

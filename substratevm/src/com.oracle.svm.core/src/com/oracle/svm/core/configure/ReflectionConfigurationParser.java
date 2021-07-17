@@ -33,6 +33,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import org.graalvm.nativeimage.impl.ConfigurationPredicate;
+
 import com.oracle.svm.core.TypeResult;
 import com.oracle.svm.core.util.json.JSONParser;
 import com.oracle.svm.core.util.json.JSONParserException;
@@ -50,7 +52,7 @@ public final class ReflectionConfigurationParser<T> extends ConfigurationParser 
     private final boolean allowIncompleteClasspath;
     private static final List<String> OPTIONAL_REFLECT_CONFIG_OBJECT_ATTRS = Arrays.asList("allDeclaredConstructors", "allPublicConstructors",
                     "allDeclaredMethods", "allPublicMethods", "allDeclaredFields", "allPublicFields",
-                    "allDeclaredClasses", "allPublicClasses", "methods", "fields");
+                    "allDeclaredClasses", "allPublicClasses", "methods", "fields", "predicate");
 
     public ReflectionConfigurationParser(ReflectionConfigurationParserDelegate<T> delegate) {
         this(delegate, false, true);
@@ -80,14 +82,29 @@ public final class ReflectionConfigurationParser<T> extends ConfigurationParser 
 
         Object classObject = data.get("name");
         String className = asString(classObject, "name");
+        ConfigurationPredicate predicate = ConfigurationPredicate.DEFAULT_CONFIGURATION_PREDICATE;
+        Object predicateData = data.get("predicate");
+        if (predicateData != null) {
+            Map<String, Object> predicateObject = asMap(predicateData, "Attribute 'predicate' must be an object");
+            Object predicateType = predicateObject.get("whenTypeReachable");
+            if (predicateType instanceof String) {
+                String preticateTypeName = (String) predicateType;
+                TypeResult<T> result = delegate.resolveTypeResult(predicate, preticateTypeName);
+                if (!result.isPresent()) {
+                    handleError("Could not resolve " + preticateTypeName + " as predicate for reflection configuration.", result.getException());
+                    return;
+                }
+                predicate = ConfigurationPredicate.create(delegate.getTypeName(result.get()));
+            }
+        }
 
-        TypeResult<T> result = delegate.resolveTypeResult(className);
+        TypeResult<T> result = delegate.resolveTypeResult(predicate, className);
         if (!result.isPresent()) {
             handleError("Could not resolve " + className + " for reflection configuration.", result.getException());
             return;
         }
         T clazz = result.get();
-        delegate.registerType(clazz);
+        delegate.registerType(predicate, clazz);
 
         for (Map.Entry<String, Object> entry : data.entrySet()) {
             String name = entry.getKey();
@@ -96,70 +113,71 @@ public final class ReflectionConfigurationParser<T> extends ConfigurationParser 
                 switch (name) {
                     case "allDeclaredConstructors":
                         if (asBoolean(value, "allDeclaredConstructors")) {
-                            delegate.registerDeclaredConstructors(clazz);
+                            delegate.registerDeclaredConstructors(predicate, clazz);
                         }
                         break;
                     case "allPublicConstructors":
                         if (asBoolean(value, "allPublicConstructors")) {
-                            delegate.registerPublicConstructors(clazz);
+                            delegate.registerPublicConstructors(predicate, clazz);
                         }
                         break;
                     case "allDeclaredMethods":
                         if (asBoolean(value, "allDeclaredMethods")) {
-                            delegate.registerDeclaredMethods(clazz);
+                            delegate.registerDeclaredMethods(predicate, clazz);
                         }
                         break;
                     case "allPublicMethods":
                         if (asBoolean(value, "allPublicMethods")) {
-                            delegate.registerPublicMethods(clazz);
+                            delegate.registerPublicMethods(predicate, clazz);
                         }
                         break;
                     case "allDeclaredFields":
                         if (asBoolean(value, "allDeclaredFields")) {
-                            delegate.registerDeclaredFields(clazz);
+                            delegate.registerDeclaredFields(predicate, clazz);
                         }
                         break;
                     case "allPublicFields":
                         if (asBoolean(value, "allPublicFields")) {
-                            delegate.registerPublicFields(clazz);
+                            delegate.registerPublicFields(predicate, clazz);
                         }
                         break;
                     case "allDeclaredClasses":
                         if (asBoolean(value, "allDeclaredClasses")) {
-                            delegate.registerDeclaredClasses(clazz);
+                            delegate.registerDeclaredClasses(predicate, clazz);
                         }
                         break;
                     case "allPublicClasses":
                         if (asBoolean(value, "allPublicClasses")) {
-                            delegate.registerPublicClasses(clazz);
+                            delegate.registerPublicClasses(predicate, clazz);
                         }
                         break;
                     case "methods":
-                        parseMethods(asList(value, "Attribute 'methods' must be an array of method descriptors"), clazz);
+                        parseMethods(predicate, asList(value, "Attribute 'methods' must be an array of method descriptors"), clazz);
                         break;
                     case "fields":
-                        parseFields(asList(value, "Attribute 'fields' must be an array of field descriptors"), clazz);
+                        parseFields(predicate, asList(value, "Attribute 'fields' must be an array of field descriptors"), clazz);
                         break;
                 }
             } catch (LinkageError e) {
                 handleError("Could not register " + delegate.getTypeName(clazz) + ": " + name + " for reflection.", e);
             }
         }
+
     }
 
-    private void parseFields(List<Object> fields, T clazz) {
+    private void parseFields(ConfigurationPredicate predicate, List<Object> fields, T clazz) {
         for (Object field : fields) {
-            parseField(asMap(field, "Elements of 'fields' array must be field descriptor objects"), clazz);
+            parseField(predicate, asMap(field, "Elements of 'fields' array must be field descriptor objects"), clazz);
         }
     }
 
-    private void parseField(Map<String, Object> data, T clazz) {
+    private void parseField(ConfigurationPredicate predicate, Map<String, Object> data, T clazz) {
         checkAttributes(data, "reflection field descriptor object", Collections.singleton("name"), Arrays.asList("allowWrite", "allowUnsafeAccess"));
         String fieldName = asString(data.get("name"), "name");
         boolean allowWrite = data.containsKey("allowWrite") && asBoolean(data.get("allowWrite"), "allowWrite");
 
         try {
-            delegate.registerField(clazz, fieldName, allowWrite);
+            delegate.registerField(predicate, clazz, fieldName, allowWrite);
         } catch (NoSuchFieldException e) {
             handleError("Field " + formatField(clazz, fieldName) + " not found.");
         } catch (LinkageError e) {
@@ -167,19 +185,19 @@ public final class ReflectionConfigurationParser<T> extends ConfigurationParser 
         }
     }
 
-    private void parseMethods(List<Object> methods, T clazz) {
+    private void parseMethods(ConfigurationPredicate predicate, List<Object> methods, T clazz) {
         for (Object method : methods) {
-            parseMethod(asMap(method, "Elements of 'methods' array must be method descriptor objects"), clazz);
+            parseMethod(predicate, asMap(method, "Elements of 'methods' array must be method descriptor objects"), clazz);
         }
     }
 
-    private void parseMethod(Map<String, Object> data, T clazz) {
+    private void parseMethod(ConfigurationPredicate predicate, Map<String, Object> data, T clazz) {
         checkAttributes(data, "reflection method descriptor object", Collections.singleton("name"), Collections.singleton("parameterTypes"));
         String methodName = asString(data.get("name"), "name");
         List<T> methodParameterTypes = null;
         Object parameterTypes = data.get("parameterTypes");
         if (parameterTypes != null) {
-            methodParameterTypes = parseMethodParameters(clazz, methodName, asList(parameterTypes,
+            methodParameterTypes = parseMethodParameters(predicate, clazz, methodName, asList(parameterTypes,
                             "Attribute 'parameterTypes' must be a list of type names"));
             if (methodParameterTypes == null) {
                 return;
@@ -190,9 +208,9 @@ public final class ReflectionConfigurationParser<T> extends ConfigurationParser 
         if (methodParameterTypes != null) {
             try {
                 if (isConstructor) {
-                    delegate.registerConstructor(clazz, methodParameterTypes);
+                    delegate.registerConstructor(predicate, clazz, methodParameterTypes);
                 } else {
-                    delegate.registerMethod(clazz, methodName, methodParameterTypes);
+                    delegate.registerMethod(predicate, clazz, methodName, methodParameterTypes);
                 }
             } catch (NoSuchMethodException e) {
                 handleError("Method " + formatMethod(clazz, methodName, methodParameterTypes) + " not found.");
@@ -203,9 +221,9 @@ public final class ReflectionConfigurationParser<T> extends ConfigurationParser 
             try {
                 boolean found;
                 if (isConstructor) {
-                    found = delegate.registerAllConstructors(clazz);
+                    found = delegate.registerAllConstructors(predicate, clazz);
                 } else {
-                    found = delegate.registerAllMethodsWithName(clazz, methodName);
+                    found = delegate.registerAllMethodsWithName(predicate, clazz, methodName);
                 }
                 if (!found) {
                     throw new JSONParserException("Method " + formatMethod(clazz, methodName) + " not found");
@@ -216,11 +234,11 @@ public final class ReflectionConfigurationParser<T> extends ConfigurationParser 
         }
     }
 
-    private List<T> parseMethodParameters(T clazz, String methodName, List<Object> types) {
+    private List<T> parseMethodParameters(ConfigurationPredicate predicate, T clazz, String methodName, List<Object> types) {
         List<T> result = new ArrayList<>();
         for (Object type : types) {
             String typeName = asString(type, "types");
-            TypeResult<T> typeResult = delegate.resolveTypeResult(typeName);
+            TypeResult<T> typeResult = delegate.resolveTypeResult(predicate, typeName);
             if (!typeResult.isPresent()) {
                 handleError("Could not register method " + formatMethod(clazz, methodName) + " for reflection.", typeResult.getException());
                 return null;

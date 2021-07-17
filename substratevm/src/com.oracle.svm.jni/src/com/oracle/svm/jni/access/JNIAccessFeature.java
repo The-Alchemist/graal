@@ -41,11 +41,14 @@ import org.graalvm.compiler.api.replacements.Fold;
 import org.graalvm.compiler.options.Option;
 import org.graalvm.nativeimage.ImageSingletons;
 import org.graalvm.nativeimage.hosted.Feature;
+import org.graalvm.nativeimage.impl.ConfigurationPredicate;
 import org.graalvm.nativeimage.impl.ReflectionRegistry;
 
 import com.oracle.graal.pointsto.meta.AnalysisField;
 import com.oracle.graal.pointsto.meta.AnalysisMethod;
 import com.oracle.graal.pointsto.meta.AnalysisType;
+import com.oracle.svm.core.PredicatedConfigurationSupport;
+import com.oracle.svm.core.TypeResult;
 import com.oracle.svm.core.configure.ConfigurationFile;
 import com.oracle.svm.core.configure.ConfigurationFiles;
 import com.oracle.svm.core.configure.ReflectionConfigurationParser;
@@ -126,26 +129,35 @@ public class JNIAccessFeature implements Feature {
                         ConfigurationFiles.Options.JNIConfigurationFiles, ConfigurationFiles.Options.JNIConfigurationResources, ConfigurationFile.JNI.getFileName());
     }
 
-    private class JNIRuntimeAccessibilitySupportImpl implements JNIRuntimeAccess.JNIRuntimeAccessibilitySupport, ReflectionRegistry {
+    private class JNIRuntimeAccessibilitySupportImpl extends PredicatedConfigurationSupport implements JNIRuntimeAccess.JNIRuntimeAccessibilitySupport, ReflectionRegistry {
         @Override
-        public void register(Class<?>... classes) {
+        public void register(ConfigurationPredicate predicate, Class<?>... classes) {
             abortIfSealed();
-            newClasses.addAll(Arrays.asList(classes));
+            registerPredicated(predicate, () -> newClasses.addAll(Arrays.asList(classes)));
         }
 
         @Override
-        public void register(Executable... methods) {
+        public void register(ConfigurationPredicate predicate, Executable... methods) {
             abortIfSealed();
-            newMethods.addAll(Arrays.asList(methods));
+            registerPredicated(predicate, () -> newMethods.addAll(Arrays.asList(methods)));
         }
 
         @Override
-        public void register(boolean finalIsWritable, Field... fields) {
+        public void register(ConfigurationPredicate predicate, boolean finalIsWritable, Field... fields) {
             abortIfSealed();
+            registerPredicated(predicate, () -> registerFields(finalIsWritable, fields));
+        }
+
+        private void registerFields(boolean finalIsWritable, Field[] fields) {
             for (Field field : fields) {
                 boolean writable = finalIsWritable || !Modifier.isFinal(field.getModifiers());
                 newFields.put(field, writable);
             }
+        }
+
+        @Override
+        protected TypeResult<Class<?>> findClass(BeforeAnalysisAccess b, String className) {
+            return ((BeforeAnalysisAccessImpl) b).getImageClassLoader().findClass(className);
         }
     }
 
@@ -170,6 +182,13 @@ public class JNIAccessFeature implements Feature {
         varargsNonvirtualCallTrampolineMethod = createJavaCallTrampoline(access, CallVariant.VARARGS, true);
         arrayNonvirtualCallTrampolineMethod = createJavaCallTrampoline(access, CallVariant.ARRAY, true);
         valistNonvirtualCallTrampolineMethod = createJavaCallTrampoline(access, CallVariant.VA_LIST, true);
+
+        /* duplicated to reduce the number of analysis iterations */
+        registerPredicatedConfiguration(access);
+    }
+
+    private static void registerPredicatedConfiguration(BeforeAnalysisAccess access) {
+        ((PredicatedConfigurationSupport) ImageSingletons.lookup(JNIRuntimeAccess.JNIRuntimeAccessibilitySupport.class)).registerPredicatedConfiguration(access);
     }
 
     private static JNICallTrampolineMethod createJavaCallTrampoline(BeforeAnalysisAccessImpl access, CallVariant variant, boolean nonVirtual) {
@@ -221,6 +240,7 @@ public class JNIAccessFeature implements Feature {
 
     @Override
     public void duringAnalysis(DuringAnalysisAccess a) {
+        registerPredicatedConfiguration(a);
         DuringAnalysisAccessImpl access = (DuringAnalysisAccessImpl) a;
         if (!wereElementsAdded()) {
             return;

@@ -28,6 +28,7 @@ import java.lang.reflect.Executable;
 import java.lang.reflect.Method;
 import java.util.List;
 
+import org.graalvm.nativeimage.impl.ConfigurationPredicate;
 import org.graalvm.nativeimage.impl.ReflectionRegistry;
 
 import com.oracle.svm.core.TypeResult;
@@ -47,18 +48,12 @@ public class ReflectionRegistryAdapter implements ReflectionConfigurationParserD
     }
 
     @Override
-    public void registerType(Class<?> type) {
-        registry.register(type);
+    public void registerType(ConfigurationPredicate predicate, Class<?> type) {
+        registry.register(predicate, type);
     }
 
     @Override
-    @SuppressWarnings("deprecation")
-    public Class<?> resolveType(String typeName) {
-        return resolveTypeResult(typeName).get();
-    }
-
-    @Override
-    public TypeResult<Class<?>> resolveTypeResult(String typeName) {
+    public TypeResult<Class<?>> resolveTypeResult(ConfigurationPredicate predicate, String typeName) {
         String name = typeName;
         if (name.indexOf('[') != -1) {
             /* accept "int[][]", "java.lang.String[]" */
@@ -68,57 +63,57 @@ public class ReflectionRegistryAdapter implements ReflectionConfigurationParserD
     }
 
     @Override
-    public void registerPublicClasses(Class<?> type) {
-        registry.register(type.getClasses());
+    public void registerPublicClasses(ConfigurationPredicate predicate, Class<?> type) {
+        registry.register(predicate, type.getClasses());
     }
 
     @Override
-    public void registerDeclaredClasses(Class<?> type) {
-        registry.register(type.getDeclaredClasses());
+    public void registerDeclaredClasses(ConfigurationPredicate predicate, Class<?> type) {
+        registry.register(predicate, type.getDeclaredClasses());
     }
 
     @Override
-    public void registerPublicFields(Class<?> type) {
-        registry.register(false, type.getFields());
+    public void registerPublicFields(ConfigurationPredicate predicate, Class<?> type) {
+        registry.register(predicate, false, type.getFields());
     }
 
     @Override
-    public void registerDeclaredFields(Class<?> type) {
-        registry.register(false, type.getDeclaredFields());
+    public void registerDeclaredFields(ConfigurationPredicate predicate, Class<?> type) {
+        registry.register(predicate, false, type.getDeclaredFields());
     }
 
     @Override
-    public void registerPublicMethods(Class<?> type) {
-        registry.register(type.getMethods());
+    public void registerPublicMethods(ConfigurationPredicate predicate, Class<?> type) {
+        registry.register(predicate, type.getMethods());
     }
 
     @Override
-    public void registerDeclaredMethods(Class<?> type) {
-        registry.register(type.getDeclaredMethods());
+    public void registerDeclaredMethods(ConfigurationPredicate predicate, Class<?> type) {
+        registry.register(predicate, type.getDeclaredMethods());
     }
 
     @Override
-    public void registerPublicConstructors(Class<?> type) {
-        registry.register(type.getConstructors());
+    public void registerPublicConstructors(ConfigurationPredicate predicate, Class<?> type) {
+        registry.register(predicate, type.getConstructors());
     }
 
     @Override
-    public void registerDeclaredConstructors(Class<?> type) {
-        registry.register(type.getDeclaredConstructors());
+    public void registerDeclaredConstructors(ConfigurationPredicate predicate, Class<?> type) {
+        registry.register(predicate, type.getDeclaredConstructors());
     }
 
     @Override
-    public void registerField(Class<?> type, String fieldName, boolean allowWrite) throws NoSuchFieldException {
-        registry.register(allowWrite, type.getDeclaredField(fieldName));
+    public void registerField(ConfigurationPredicate predicate, Class<?> type, String fieldName, boolean allowWrite) throws NoSuchFieldException {
+        registry.register(predicate, allowWrite, type.getDeclaredField(fieldName));
     }
 
     @Override
-    public boolean registerAllMethodsWithName(Class<?> type, String methodName) {
+    public boolean registerAllMethodsWithName(ConfigurationPredicate predicate, Class<?> type, String methodName) {
         boolean found = false;
         Executable[] methods = type.getDeclaredMethods();
         for (Executable method : methods) {
             if (method.getName().equals(methodName)) {
-                registry.register(method);
+                registry.register(predicate, method);
                 found = true;
             }
         }
@@ -126,16 +121,16 @@ public class ReflectionRegistryAdapter implements ReflectionConfigurationParserD
     }
 
     @Override
-    public boolean registerAllConstructors(Class<?> clazz) {
+    public boolean registerAllConstructors(ConfigurationPredicate predicate, Class<?> clazz) {
         Executable[] methods = clazz.getDeclaredConstructors();
         for (Executable method : methods) {
-            registry.register(method);
+            registry.register(predicate, method);
         }
         return methods.length > 0;
     }
 
     @Override
-    public void registerMethod(Class<?> type, String methodName, List<Class<?>> methodParameterTypes) throws NoSuchMethodException {
+    public void registerMethod(ConfigurationPredicate predicate, Class<?> type, String methodName, List<Class<?>> methodParameterTypes) throws NoSuchMethodException {
         Class<?>[] parameterTypesArray = methodParameterTypes.toArray(new Class<?>[0]);
         Method method;
         try {
@@ -155,13 +150,13 @@ public class ReflectionRegistryAdapter implements ReflectionConfigurationParserD
                 throw e;
             }
         }
-        registry.register(method);
+        registry.register(predicate, method);
     }
 
     @Override
-    public void registerConstructor(Class<?> clazz, List<Class<?>> methodParameterTypes) throws NoSuchMethodException {
+    public void registerConstructor(ConfigurationPredicate predicate, Class<?> clazz, List<Class<?>> methodParameterTypes) throws NoSuchMethodException {
         Class<?>[] parameterTypesArray = methodParameterTypes.toArray(new Class<?>[0]);
-        registry.register(clazz.getDeclaredConstructor(parameterTypesArray));
+        registry.register(predicate, clazz.getDeclaredConstructor(parameterTypesArray));
     }
 
     @Override

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -40,14 +40,42 @@
  */
 package org.graalvm.nativeimage.impl;
 
-import java.lang.reflect.Executable;
-import java.lang.reflect.Field;
+import java.util.Objects;
 
-public interface ReflectionRegistry {
-    void register(ConfigurationPredicate predicate, Class<?>... classes);
+public final class ConfigurationPredicate {
+    private final String typeReachability;
+    public static final ConfigurationPredicate DEFAULT_CONFIGURATION_PREDICATE = new ConfigurationPredicate(Object.class.getTypeName());
 
-    void register(ConfigurationPredicate predicate, Executable... methods);
+    public static ConfigurationPredicate create(String typeReachability) {
+        if (DEFAULT_CONFIGURATION_PREDICATE.typeReachability.equals(typeReachability)) {
+            return DEFAULT_CONFIGURATION_PREDICATE;
+        }
+        return new ConfigurationPredicate(typeReachability);
+    }
 
-    void register(ConfigurationPredicate predicate, boolean finalIsWritable, Field... fields);
+    private ConfigurationPredicate(String typeReachability) {
+        this.typeReachability = typeReachability;
+    }
+
+    public String getTypeReachability() {
+        return typeReachability;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        ConfigurationPredicate predicate = (ConfigurationPredicate) o;
+        return Objects.equals(typeReachability, predicate.typeReachability);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(typeReachability);
+    }
 
 }
