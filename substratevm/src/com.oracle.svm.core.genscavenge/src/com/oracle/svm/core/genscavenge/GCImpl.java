@@ -329,6 +329,7 @@ public final class GCImpl implements GC {
             verboseGCLog.string("[Heap policy parameters: ").newline();
             verboseGCLog.string("  YoungGenerationSize: ").unsigned(getPolicy().getMaximumYoungGenerationSize()).newline();
             verboseGCLog.string("      MaximumHeapSize: ").unsigned(getPolicy().getMaximumHeapSize()).newline();
+            verboseGCLog.string("      MinimumHeapSize: ").unsigned(getPolicy().getMinimumHeapSize()).newline();
             verboseGCLog.string("     AlignedChunkSize: ").unsigned(HeapParameters.getAlignedHeapChunkSize()).newline();
             verboseGCLog.string("  LargeArrayThreshold: ").unsigned(HeapParameters.getLargeArrayThreshold()).string("]").newline();
             if (HeapOptions.PrintHeapShape.getValue()) {
@@ -948,12 +949,13 @@ public final class GCImpl implements GC {
     @AlwaysInline("GC performance")
     @SuppressWarnings("static-method")
     Object promoteObject(Object original, UnsignedWord header) {
-        Log trace = Log.noopLog().string("[GCImpl.promoteObject:").string("  original: ").object(original);
-
         HeapImpl heap = HeapImpl.getHeapImpl();
         boolean isAligned = ObjectHeaderImpl.isAlignedHeader(header);
         Header<?> originalChunk = getChunk(original, isAligned);
         Space originalSpace = HeapChunk.getSpace(originalChunk);
+        if (!originalSpace.isFromSpace()) {
+            return original;
+        }
 
         Object result = null;
         boolean survivorOverflow = false;
@@ -973,11 +975,10 @@ public final class GCImpl implements GC {
             }
             assert result != null : "promotion failure in old generation must have been handled";
             if (result != original) {
-                accounting.onObjectPromoted(result, survivorOverflow);
+                accounting.onObjectTenured(result, survivorOverflow);
             }
         }
 
-        trace.string("  result: ").object(result).string("]").newline();
         return result;
     }
 
@@ -996,13 +997,14 @@ public final class GCImpl implements GC {
             boolean isAligned = ObjectHeaderImpl.isAlignedObject(referent);
             Header<?> originalChunk = getChunk(referent, isAligned);
             Space originalSpace = HeapChunk.getSpace(originalChunk);
-
-            boolean promoted = false;
-            if (originalSpace.getNextAgeForPromotion() < policy.getTenuringAge()) {
-                promoted = heap.getYoungGeneration().promoteChunk(originalChunk, isAligned, originalSpace);
-            }
-            if (!promoted) {
-                heap.getOldGeneration().promoteChunk(originalChunk, isAligned, originalSpace);
+            if (originalSpace.isFromSpace()) {
+                boolean promoted = false;
+                if (originalSpace.getNextAgeForPromotion() < policy.getTenuringAge()) {
+                    promoted = heap.getYoungGeneration().promoteChunk(originalChunk, isAligned, originalSpace);
+                }
+                if (!promoted) {
+                    heap.getOldGeneration().promoteChunk(originalChunk, isAligned, originalSpace);
+                }
             }
         }
     }
@@ -1264,6 +1266,7 @@ public final class GCImpl implements GC {
         final String prefix = "PrintGCSummary: ";
 
         log.string(prefix).string("MaximumYoungGenerationSize: ").unsigned(getPolicy().getMaximumYoungGenerationSize()).newline();
+        log.string(prefix).string("MinimumHeapSize: ").unsigned(getPolicy().getMinimumHeapSize()).newline();
         log.string(prefix).string("MaximumHeapSize: ").unsigned(getPolicy().getMaximumHeapSize()).newline();
         log.string(prefix).string("AlignedChunkSize: ").unsigned(HeapParameters.getAlignedHeapChunkSize()).newline();
 
