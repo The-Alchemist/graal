@@ -70,17 +70,21 @@ final class AdaptiveCollectionPolicy implements CollectionPolicy {
     static final int SURVIVOR_PADDING = 3;
     static final int INITIAL_TENURING_THRESHOLD = 7;
     static final int PROMOTED_PADDING = 3;
-    static final int YOUNG_GENERATION_SIZE_SUPPLEMENT = 80;
     static final int TENURED_GENERATION_SIZE_SUPPLEMENT_DECAY = 2;
     static final int YOUNG_GENERATION_SIZE_SUPPLEMENT_DECAY = 8;
-    static final int TENURED_GENERATION_SIZE_SUPPLEMENT = 80;
     static final int TENURED_GENERATION_SIZE_INCREMENT = 20;
     static final int MIN_SURVIVOR_RATIO = 3;
     /**
      * Ratio of mutator wall-clock time to GC wall-clock time. HotSpot's default is 99, i.e.
-     * spending 1% of time in GC. We set it to 19, i.e. 5%, to prefer a small footprint.
+     * spending 1% of time in GC. We set it to 11, i.e. ~8%, to prefer a small footprint.
      */
-    static final int GC_TIME_RATIO = 19;
+    static final int GC_TIME_RATIO = 11;
+    /*
+     * Supplements to accelerate the expansion of the heap at startup. We do not use them in favor
+     * of a small footprint.
+     */
+    static final int YOUNG_GENERATION_SIZE_SUPPLEMENT = 0; // HotSpot default: 80
+    static final int TENURED_GENERATION_SIZE_SUPPLEMENT = 0; // HotSpot default: 80
 
     /* Constants derived from other constants. */
     static final double THROUGHPUT_GOAL = 1.0 - 1.0 / (1.0 + GC_TIME_RATIO);
