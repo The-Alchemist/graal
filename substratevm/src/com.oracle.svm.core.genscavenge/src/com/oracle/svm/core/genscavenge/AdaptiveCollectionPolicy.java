@@ -58,7 +58,6 @@ final class AdaptiveCollectionPolicy implements CollectionPolicy {
      */
     static final int INITIAL_SURVIVOR_RATIO = 8;
     static final int ADAPTIVE_SIZE_POLICY_READY_THRESHOLD = 5;
-    static final int YOUNG_GENERATION_SIZE_INCREMENT = 20;
     static final int ADAPTIVE_SIZE_DECREMENT_SCALE_FACTOR = 4;
     static final int ADAPTIVE_SIZE_POLICY_WEIGHT = 10;
     static final int ADAPTIVE_TIME_WEIGHT = 25;
@@ -72,8 +71,13 @@ final class AdaptiveCollectionPolicy implements CollectionPolicy {
     static final int PROMOTED_PADDING = 3;
     static final int TENURED_GENERATION_SIZE_SUPPLEMENT_DECAY = 2;
     static final int YOUNG_GENERATION_SIZE_SUPPLEMENT_DECAY = 8;
-    static final int TENURED_GENERATION_SIZE_INCREMENT = 20;
     static final int MIN_SURVIVOR_RATIO = 3;
+    /*
+     * Maximum size increment percentages. We reduce them from HotSpot's default of 20 to avoid
+     * growing the heap too eagerly.
+     */
+    static final int TENURED_GENERATION_SIZE_INCREMENT = 10;
+    static final int YOUNG_GENERATION_SIZE_INCREMENT = 10;
     /**
      * Ratio of mutator wall-clock time to GC wall-clock time. HotSpot's default is 99, i.e.
      * spending 1% of time in GC. We set it to 11, i.e. ~8%, to prefer a small footprint.
@@ -93,10 +97,10 @@ final class AdaptiveCollectionPolicy implements CollectionPolicy {
      * discounting of old data points, unlike HotSpot's AdaptiveSizeThroughPutPolicy option
      * (disabled by default) which uses linear least-square fitting without discounting.
      */
-    static final boolean ADAPTIVE_SIZE_USE_COST_ESTIMATORS = false;
+    static final boolean ADAPTIVE_SIZE_USE_COST_ESTIMATORS = true;
     static final int ADAPTIVE_SIZE_POLICY_INITIALIZING_STEPS = ADAPTIVE_SIZE_POLICY_READY_THRESHOLD;
     /** The minimum increase in throughput in percent for expanding a space by 1% of its size. */
-    static final double ADAPTIVE_SIZE_ESTIMATOR_MIN_SIZE_THROUGHPUT_TRADEOFF = 0.5;
+    static final double ADAPTIVE_SIZE_ESTIMATOR_MIN_SIZE_THROUGHPUT_TRADEOFF = 1;
     /** The effective number of most recent data points used by estimator (exponential decay). */
     static final int ADAPTIVE_SIZE_COST_ESTIMATORS_HISTORY_LENGTH = ADAPTIVE_TIME_WEIGHT;
 
