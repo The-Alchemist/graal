@@ -34,7 +34,6 @@ import static org.graalvm.compiler.lir.LIRInstruction.OperandFlag.REG;
 import org.graalvm.compiler.asm.Label;
 import org.graalvm.compiler.asm.aarch64.AArch64ASIMDAssembler.ASIMDSize;
 import org.graalvm.compiler.asm.aarch64.AArch64ASIMDAssembler.ElementSize;
-import org.graalvm.compiler.asm.aarch64.AArch64ASIMDMacroAssembler;
 import org.graalvm.compiler.asm.aarch64.AArch64Address;
 import org.graalvm.compiler.asm.aarch64.AArch64Assembler.ShiftType;
 import org.graalvm.compiler.asm.aarch64.AArch64MacroAssembler;
@@ -46,8 +45,8 @@ import org.graalvm.compiler.lir.asm.CompilationResultBuilder;
 import org.graalvm.compiler.lir.gen.LIRGeneratorTool;
 
 import jdk.vm.ci.code.Register;
+import jdk.vm.ci.meta.AllocatableValue;
 import jdk.vm.ci.meta.JavaKind;
-import jdk.vm.ci.meta.Value;
 
 @Opcode("AArch64_ARRAY_INDEX_OF")
 public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
@@ -57,26 +56,27 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
     private final boolean findTwoConsecutive;
     private final int arrayBaseOffset;
 
-    @Def({REG}) protected Value resultValue;
-    @Alive({REG}) protected Value arrayPtrValue;
-    @Alive({REG}) protected Value arrayLengthValue;
-    @Alive({REG}) protected Value fromIndexValue;
-    @Alive({REG}) protected Value searchValue;
-    @Temp({REG}) protected Value temp1;
-    @Temp({REG}) protected Value temp2;
-    @Temp({REG}) protected Value temp3;
-    @Temp({REG}) protected Value temp4;
-    @Temp({REG}) protected Value temp5;
-    @Temp({REG}) protected Value vectorTemp1;
-    @Temp({REG}) protected Value vectorTemp2;
-    @Temp({REG}) protected Value vectorTemp3;
-    @Temp({REG}) protected Value vectorTemp4;
-    @Temp({REG}) protected Value vectorTemp5;
-    @Temp({REG}) protected Value vectorTemp6;
-    @Temp({REG}) protected Value vectorTemp7;
+    @Def({REG}) protected AllocatableValue resultValue;
+    @Alive({REG}) protected AllocatableValue arrayPtrValue;
+    @Alive({REG}) protected AllocatableValue arrayLengthValue;
+    @Alive({REG}) protected AllocatableValue fromIndexValue;
+    @Alive({REG}) protected AllocatableValue searchValue;
+    @Temp({REG}) protected AllocatableValue temp1;
+    @Temp({REG}) protected AllocatableValue temp2;
+    @Temp({REG}) protected AllocatableValue temp3;
+    @Temp({REG}) protected AllocatableValue temp4;
+    @Temp({REG}) protected AllocatableValue temp5;
+    @Temp({REG}) protected AllocatableValue vectorTemp1;
+    @Temp({REG}) protected AllocatableValue vectorTemp2;
+    @Temp({REG}) protected AllocatableValue vectorTemp3;
+    @Temp({REG}) protected AllocatableValue vectorTemp4;
+    @Temp({REG}) protected AllocatableValue vectorTemp5;
+    @Temp({REG}) protected AllocatableValue vectorTemp6;
+    @Temp({REG}) protected AllocatableValue vectorTemp7;
 
-    public AArch64ArrayIndexOfOp(int arrayBaseOffset, JavaKind valueKind, boolean findTwoConsecutive, LIRGeneratorTool tool, Value result, Value arrayPtr, Value arrayLength, Value fromIndex,
-                    Value searchValue) {
+    public AArch64ArrayIndexOfOp(int arrayBaseOffset, JavaKind valueKind, boolean findTwoConsecutive, LIRGeneratorTool tool, AllocatableValue result, AllocatableValue arrayPtr,
+                    AllocatableValue arrayLength, AllocatableValue fromIndex,
+                    AllocatableValue searchValue) {
         super(TYPE);
         assert byteMode(valueKind) || charMode(valueKind);
         this.arrayBaseOffset = arrayBaseOffset;
@@ -266,18 +266,17 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
             magicConstant = 0xc000_0300_00c0_0003L;
         }
 
-        AArch64ASIMDMacroAssembler simdMasm = new AArch64ASIMDMacroAssembler(masm);
         try (ScratchRegister scratchReg1 = masm.getScratchRegister(); ScratchRegister scratchReg2 = masm.getScratchRegister()) {
             Register bitMask01Reg = scratchReg1.getRegister();
             Register bitMask7fReg = scratchReg2.getRegister();
 
             masm.mov(bitMask01Reg, bitMask01);
             masm.mov(bitMask7fReg, bitMask7f);
-            simdMasm.dupVG(ASIMDSize.FullReg, elementSize, bitMask01RegV, bitMask01Reg);
-            simdMasm.dupVG(ASIMDSize.FullReg, elementSize, bitMask7fRegV, bitMask7fReg);
+            masm.neon.dupVG(ASIMDSize.FullReg, elementSize, bitMask01RegV, bitMask01Reg);
+            masm.neon.dupVG(ASIMDSize.FullReg, elementSize, bitMask7fRegV, bitMask7fReg);
         }
         /* 1. Duplicate the searchChar to 32-bytes */
-        simdMasm.dupVG(ASIMDSize.FullReg, elementSize, searchCharRegV, searchChar);
+        masm.neon.dupVG(ASIMDSize.FullReg, elementSize, searchCharRegV, searchChar);
         /*
          * 2.1 Set endOfString pointing to byte next to the last valid char in the string and
          * 'refAddress' pointing to the beginning of the last chunk.
@@ -297,28 +296,23 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
         masm.bind(searchByChunkLoopTail);
         masm.sub(64, currOffset, chunkToReadAddress, baseAddress);
 
-        /*
-         * TODO: Combine the following 4 instructions to load a 32-byte chunk into 1 instruction
-         * equivalent to 'LD1 {chunkPart1RegV.16b, chunkPart2RegV.16b}, [chunkToReadAddress], #32'
-         */
-        simdMasm.loadV1(ASIMDSize.FullReg, chunkPart1RegV, chunkToReadAddress, true);
-        simdMasm.loadV1(ASIMDSize.FullReg, chunkPart2RegV, chunkToReadAddress, true);
+        masm.fldp(128, chunkPart1RegV, chunkPart2RegV, AArch64Address.createImmediateAddress(128, AArch64Address.AddressingMode.IMMEDIATE_PAIR_POST_INDEXED, chunkToReadAddress, 32));
         /* 3. Find searchChar in the 32-byte chunk */
-        simdMasm.eorVVV(ASIMDSize.FullReg, chunkPart1RegV, chunkPart1RegV, searchCharRegV);
-        simdMasm.eorVVV(ASIMDSize.FullReg, chunkPart2RegV, chunkPart2RegV, searchCharRegV);
-        simdMasm.orrVVV(ASIMDSize.FullReg, tmpRegV1, chunkPart1RegV, bitMask7fRegV);
-        simdMasm.orrVVV(ASIMDSize.FullReg, tmpRegV2, chunkPart2RegV, bitMask7fRegV);
-        simdMasm.subVVV(ASIMDSize.FullReg, elementSize, chunkPart1RegV, chunkPart1RegV, bitMask01RegV);
-        simdMasm.subVVV(ASIMDSize.FullReg, elementSize, chunkPart2RegV, chunkPart2RegV, bitMask01RegV);
-        simdMasm.bicVVV(ASIMDSize.FullReg, chunkPart1RegV, chunkPart1RegV, tmpRegV1);
-        simdMasm.bicVVV(ASIMDSize.FullReg, chunkPart2RegV, chunkPart2RegV, tmpRegV2);
+        masm.neon.eorVVV(ASIMDSize.FullReg, chunkPart1RegV, chunkPart1RegV, searchCharRegV);
+        masm.neon.eorVVV(ASIMDSize.FullReg, chunkPart2RegV, chunkPart2RegV, searchCharRegV);
+        masm.neon.orrVVV(ASIMDSize.FullReg, tmpRegV1, chunkPart1RegV, bitMask7fRegV);
+        masm.neon.orrVVV(ASIMDSize.FullReg, tmpRegV2, chunkPart2RegV, bitMask7fRegV);
+        masm.neon.subVVV(ASIMDSize.FullReg, elementSize, chunkPart1RegV, chunkPart1RegV, bitMask01RegV);
+        masm.neon.subVVV(ASIMDSize.FullReg, elementSize, chunkPart2RegV, chunkPart2RegV, bitMask01RegV);
+        masm.neon.bicVVV(ASIMDSize.FullReg, chunkPart1RegV, chunkPart1RegV, tmpRegV1);
+        masm.neon.bicVVV(ASIMDSize.FullReg, chunkPart2RegV, chunkPart2RegV, tmpRegV2);
 
         try (ScratchRegister scratchReg1 = masm.getScratchRegister(); ScratchRegister scratchReg2 = masm.getScratchRegister()) {
             Register pairwiseSumPart1 = scratchReg1.getRegister();
             Register pairwiseSumPart2 = scratchReg2.getRegister();
-            simdMasm.orrVVV(ASIMDSize.FullReg, pairwiseSumRegV, chunkPart1RegV, chunkPart2RegV);
-            simdMasm.moveFromIndex(ElementSize.DoubleWord, ElementSize.DoubleWord, pairwiseSumPart1, pairwiseSumRegV, 0);
-            simdMasm.moveFromIndex(ElementSize.DoubleWord, ElementSize.DoubleWord, pairwiseSumPart2, pairwiseSumRegV, 1);
+            masm.neon.orrVVV(ASIMDSize.FullReg, pairwiseSumRegV, chunkPart1RegV, chunkPart2RegV);
+            masm.neon.moveFromIndex(ElementSize.DoubleWord, ElementSize.DoubleWord, pairwiseSumPart1, pairwiseSumRegV, 0);
+            masm.neon.moveFromIndex(ElementSize.DoubleWord, ElementSize.DoubleWord, pairwiseSumPart2, pairwiseSumRegV, 1);
             masm.orr(64, pairwiseSumPart1, pairwiseSumPart1, pairwiseSumPart2);
             masm.cbnz(64, pairwiseSumPart1, matchInChunk);
             masm.bic(64, chunkToReadAddress, chunkToReadAddress, 31);
@@ -344,8 +338,8 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
          * positions. Thus, the element at matching position is negative and checking if element < 0
          * would set all the corresponding bits.
          */
-        simdMasm.cmltZeroVV(ASIMDSize.FullReg, elementSize, chunkPart1RegV, chunkPart1RegV);
-        simdMasm.cmltZeroVV(ASIMDSize.FullReg, elementSize, chunkPart2RegV, chunkPart2RegV);
+        masm.neon.cmltZeroVV(ASIMDSize.FullReg, elementSize, chunkPart1RegV, chunkPart1RegV);
+        masm.neon.cmltZeroVV(ASIMDSize.FullReg, elementSize, chunkPart2RegV, chunkPart2RegV);
         /*
          * 4.2 Using the magic constant set 2 bits in the matching byte that represent its position
          * in the chunk
@@ -353,18 +347,18 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
         try (ScratchRegister scratchReg = masm.getScratchRegister()) {
             Register magicConstantReg = scratchReg.getRegister();
             masm.mov(magicConstantReg, magicConstant);
-            simdMasm.dupVG(ASIMDSize.FullReg, ElementSize.DoubleWord, magicConstantRegV, magicConstantReg);
+            masm.neon.dupVG(ASIMDSize.FullReg, ElementSize.DoubleWord, magicConstantRegV, magicConstantReg);
         }
-        simdMasm.andVVV(ASIMDSize.FullReg, chunkPart1RegV, chunkPart1RegV, magicConstantRegV);
-        simdMasm.andVVV(ASIMDSize.FullReg, chunkPart2RegV, chunkPart2RegV, magicConstantRegV);
+        masm.neon.andVVV(ASIMDSize.FullReg, chunkPart1RegV, chunkPart1RegV, magicConstantRegV);
+        masm.neon.andVVV(ASIMDSize.FullReg, chunkPart2RegV, chunkPart2RegV, magicConstantRegV);
         /* 4.3 Convert 32-byte to 8-byte representation, 2 bits per byte. */
-        simdMasm.addpVV(ASIMDSize.FullReg, elementSize, chunkPart1RegV, chunkPart1RegV, chunkPart2RegV);
-        simdMasm.addpVV(ASIMDSize.FullReg, elementSize, chunkPart1RegV, chunkPart1RegV, chunkPart2RegV);
+        masm.neon.addpVVV(ASIMDSize.FullReg, elementSize, chunkPart1RegV, chunkPart1RegV, chunkPart2RegV);
+        masm.neon.addpVVV(ASIMDSize.FullReg, elementSize, chunkPart1RegV, chunkPart1RegV, chunkPart2RegV);
 
         try (ScratchRegister scratchReg = masm.getScratchRegister()) {
             Register matchPositionReg = scratchReg.getRegister();
             /* Detect the position of matching char in the chunk */
-            simdMasm.moveFromIndex(ElementSize.DoubleWord, ElementSize.DoubleWord, matchPositionReg, chunkPart1RegV, 0);
+            masm.neon.moveFromIndex(ElementSize.DoubleWord, ElementSize.DoubleWord, matchPositionReg, chunkPart1RegV, 0);
             masm.rbit(64, matchPositionReg, matchPositionReg);
             masm.clz(64, matchPositionReg, matchPositionReg);
             masm.add(64, result, currOffset, matchPositionReg, ShiftType.ASR, 1);
