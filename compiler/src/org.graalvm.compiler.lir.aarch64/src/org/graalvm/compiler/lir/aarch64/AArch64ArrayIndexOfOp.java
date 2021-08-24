@@ -39,6 +39,7 @@ import org.graalvm.compiler.asm.aarch64.AArch64Assembler.ShiftType;
 import org.graalvm.compiler.asm.aarch64.AArch64MacroAssembler;
 import org.graalvm.compiler.asm.aarch64.AArch64MacroAssembler.ScratchRegister;
 import org.graalvm.compiler.core.common.LIRKind;
+import org.graalvm.compiler.core.common.NumUtil;
 import org.graalvm.compiler.lir.LIRInstructionClass;
 import org.graalvm.compiler.lir.Opcode;
 import org.graalvm.compiler.lir.asm.CompilationResultBuilder;
@@ -115,7 +116,6 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
     private void emitScalarCode(AArch64MacroAssembler masm, Register curIndex, Register baseAddress) {
         Register result = asRegister(resultValue);
         Register arrayLength = asRegister(arrayLengthValue);
-        Register searchChar = asRegister(searchValue);
         Register curChar = asRegister(temp3);
         Register endIndex = asRegister(temp4);
 
@@ -136,6 +136,20 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
             shiftSize = 1;
         }
 
+        final int charBitSize = charsToRead * charSize * Byte.SIZE;
+
+        /*
+         * AArch64 comparisons are at minimum 32 bits; since we are comparing against a
+         * zero-extended value, searchChar must also be zero-extended.
+         */
+        Register searchChar;
+        if (charBitSize < 32) {
+            searchChar = asRegister(temp5);
+            masm.and(32, searchChar, asRegister(searchValue), ~NumUtil.getNbitNumberLong(charBitSize));
+        } else {
+            searchChar = asRegister(searchValue);
+        }
+
         /*
          * While searching for one character (not two consecutive), search sequentially if the
          * target string is small. Note that all indexing is done via a negative offset from the
@@ -148,9 +162,8 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
         masm.sub(64, curIndex, zr, curIndex, ShiftType.LSL, shiftSize);
         /* Loop doing char-by-char search */
         masm.bind(searchByCharLoop);
-        final int charBitSize = charsToRead * charSize * Byte.SIZE;
         masm.ldr(charBitSize, curChar, AArch64Address.createRegisterOffsetAddress(charBitSize, baseAddress, curIndex, false));
-        masm.cmp(32, curChar, searchChar);
+        masm.cmp(Math.max(charBitSize, 32), searchChar, curChar);
         masm.branchConditionally(ConditionFlag.EQ, match);
 
         /*
