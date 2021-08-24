@@ -145,7 +145,7 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
         Register searchChar;
         if (charBitSize < 32) {
             searchChar = asRegister(temp5);
-            masm.and(32, searchChar, asRegister(searchValue), ~NumUtil.getNbitNumberLong(charBitSize));
+            masm.and(32, searchChar, asRegister(searchValue), NumUtil.getNbitNumberLong(charBitSize));
         } else {
             searchChar = asRegister(searchValue);
         }
