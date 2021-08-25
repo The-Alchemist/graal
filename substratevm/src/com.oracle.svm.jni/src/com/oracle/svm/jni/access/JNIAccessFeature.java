@@ -134,7 +134,8 @@ public class JNIAccessFeature implements Feature {
         }
 
         @Override
-        public void register(Executable... methods) {
+        public void register(boolean queriedOnly, Executable... methods) {
+            assert !queriedOnly;
             abortIfSealed();
             newMethods.addAll(Arrays.asList(methods));
         }

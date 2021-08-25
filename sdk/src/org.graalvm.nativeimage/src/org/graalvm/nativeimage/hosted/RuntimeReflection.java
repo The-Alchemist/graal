@@ -79,7 +79,7 @@ public final class RuntimeReflection {
      * @since 19.0
      */
     public static void register(Executable... methods) {
-        ImageSingletons.lookup(RuntimeReflectionSupport.class).register(methods);
+        ImageSingletons.lookup(RuntimeReflectionSupport.class).register(false, methods);
     }
 
     /**

@@ -50,23 +50,23 @@ public interface ReflectionConfigurationParserDelegate<T> {
 
     void registerDeclaredFields(T type);
 
-    void registerPublicMethods(T type);
+    void registerPublicMethods(T type, boolean queriedOnly);
 
-    void registerDeclaredMethods(T type);
+    void registerDeclaredMethods(T type, boolean queriedOnly);
 
-    void registerPublicConstructors(T type);
+    void registerPublicConstructors(T type, boolean queriedOnly);
 
-    void registerDeclaredConstructors(T type);
+    void registerDeclaredConstructors(T type, boolean queriedOnly);
 
     void registerField(T type, String fieldName, boolean allowWrite) throws NoSuchFieldException;
 
-    boolean registerAllMethodsWithName(T type, String methodName);
+    boolean registerAllMethodsWithName(T type, String methodName, boolean queriedOnly);
 
-    void registerMethod(T type, String methodName, List<T> methodParameterTypes) throws NoSuchMethodException;
+    void registerMethod(T type, String methodName, List<T> methodParameterTypes, boolean queriedOnly) throws NoSuchMethodException;
 
-    void registerConstructor(T type, List<T> methodParameterTypes) throws NoSuchMethodException;
+    void registerConstructor(T type, List<T> methodParameterTypes, boolean queriedOnly) throws NoSuchMethodException;
 
-    boolean registerAllConstructors(T type);
+    boolean registerAllConstructors(T type, boolean queriedOnly);
 
     String getTypeName(T type);
 

@@ -46,8 +46,11 @@ import java.lang.reflect.Field;
 public interface ReflectionRegistry {
     void register(Class<?>... classes);
 
-    void register(Executable... methods);
+    void register(boolean queriedOnly, Executable... methods);
 
     void register(boolean finalIsWritable, Field... fields);
 
+    default boolean isQueried(Executable method) {
+        return false;
+    }
 }

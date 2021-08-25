@@ -42,6 +42,7 @@ public class NativeImageAgentJNIHandleSet extends JNIHandleSet {
 
     final JNIMethodId javaLangReflectMemberGetName;
     final JNIMethodId javaLangReflectMemberGetDeclaringClass;
+    final JNIMethodId javaLangReflectExecutableGetParameterTypes;
 
     final JNIMethodId javaUtilEnumerationHasMoreElements;
 
@@ -51,6 +52,8 @@ public class NativeImageAgentJNIHandleSet extends JNIHandleSet {
     final JNIObjectHandle jdkInternalReflectDelegatingClassLoader;
 
     final JNIMethodId javaLangObjectGetClass;
+
+    final JNIObjectHandle javaLangStackOverflowError;
 
     private JNIMethodId javaLangInvokeMethodTypeParameterArray = WordFactory.nullPointer();
     private JNIMethodId javaLangInvokeMethodTypeReturnType = WordFactory.nullPointer();
@@ -78,6 +81,8 @@ public class NativeImageAgentJNIHandleSet extends JNIHandleSet {
         JNIObjectHandle javaLangReflectMember = findClass(env, "java/lang/reflect/Member");
         javaLangReflectMemberGetName = getMethodId(env, javaLangReflectMember, "getName", "()Ljava/lang/String;", false);
         javaLangReflectMemberGetDeclaringClass = getMethodId(env, javaLangReflectMember, "getDeclaringClass", "()Ljava/lang/Class;", false);
+        JNIObjectHandle javaLangReflectExecutable = findClass(env, "java/lang/reflect/Executable");
+        javaLangReflectExecutableGetParameterTypes = getMethodId(env, javaLangReflectExecutable, "getParameterTypes", "()[Ljava/lang/Class;", false);
 
         JNIObjectHandle javaUtilEnumeration = findClass(env, "java/util/Enumeration");
         javaUtilEnumerationHasMoreElements = getMethodId(env, javaUtilEnumeration, "hasMoreElements", "()Z", false);
@@ -93,6 +98,8 @@ public class NativeImageAgentJNIHandleSet extends JNIHandleSet {
 
         JNIObjectHandle javaLangObject = findClass(env, "java/lang/Object");
         javaLangObjectGetClass = getMethodId(env, javaLangObject, "getClass", "()Ljava/lang/Class;", false);
+
+        javaLangStackOverflowError = newClassGlobalRef(env, "java/lang/StackOverflowError");
 
         javaLangIllegalAccessException = newClassGlobalRef(env, "java/lang/IllegalAccessException");
         javaLangInvokeWrongMethodTypeException = newClassGlobalRef(env, "java/lang/invoke/WrongMethodTypeException");

@@ -580,4 +580,8 @@ public class SubstrateOptions {
             this.reportsPath = reportingPath;
         }
     }
+
+    @APIOption(name = "configure-reflection-metadata")//
+    @Option(help = "Configure inclusion of reflection metadata instead of including it for all methods by default")//
+    public static final HostedOptionKey<Boolean> ConfigureReflectionMetadata = new HostedOptionKey<>(false);
 }

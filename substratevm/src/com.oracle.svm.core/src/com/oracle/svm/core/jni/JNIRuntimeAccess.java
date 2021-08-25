@@ -52,7 +52,7 @@ public final class JNIRuntimeAccess {
     }
 
     public static void register(Executable... methods) {
-        getSupport().register(methods);
+        getSupport().register(false, methods);
     }
 
     public static void register(Field... fields) {

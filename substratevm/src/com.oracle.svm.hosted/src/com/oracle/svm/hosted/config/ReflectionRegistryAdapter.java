@@ -88,23 +88,23 @@ public class ReflectionRegistryAdapter implements ReflectionConfigurationParserD
     }
 
     @Override
-    public void registerPublicMethods(Class<?> type) {
-        registry.register(type.getMethods());
+    public void registerPublicMethods(Class<?> type, boolean queriedOnly) {
+        registerExecutable(queriedOnly, type.getMethods());
     }
 
     @Override
-    public void registerDeclaredMethods(Class<?> type) {
-        registry.register(type.getDeclaredMethods());
+    public void registerDeclaredMethods(Class<?> type, boolean queriedOnly) {
+        registerExecutable(queriedOnly, type.getDeclaredMethods());
     }
 
     @Override
-    public void registerPublicConstructors(Class<?> type) {
-        registry.register(type.getConstructors());
+    public void registerPublicConstructors(Class<?> type, boolean queriedOnly) {
+        registerExecutable(queriedOnly, type.getConstructors());
     }
 
     @Override
-    public void registerDeclaredConstructors(Class<?> type) {
-        registry.register(type.getDeclaredConstructors());
+    public void registerDeclaredConstructors(Class<?> type, boolean queriedOnly) {
+        registerExecutable(queriedOnly, type.getDeclaredConstructors());
     }
 
     @Override
@@ -113,12 +113,12 @@ public class ReflectionRegistryAdapter implements ReflectionConfigurationParserD
     }
 
     @Override
-    public boolean registerAllMethodsWithName(Class<?> type, String methodName) {
+    public boolean registerAllMethodsWithName(Class<?> type, String methodName, boolean queriedOnly) {
         boolean found = false;
         Executable[] methods = type.getDeclaredMethods();
         for (Executable method : methods) {
             if (method.getName().equals(methodName)) {
-                registry.register(method);
+                registerExecutable(queriedOnly, method);
                 found = true;
             }
         }
@@ -126,16 +126,14 @@ public class ReflectionRegistryAdapter implements ReflectionConfigurationParserD
     }
 
     @Override
-    public boolean registerAllConstructors(Class<?> clazz) {
+    public boolean registerAllConstructors(Class<?> clazz, boolean queriedOnly) {
         Executable[] methods = clazz.getDeclaredConstructors();
-        for (Executable method : methods) {
-            registry.register(method);
-        }
+        registerExecutable(queriedOnly, methods);
         return methods.length > 0;
     }
 
     @Override
-    public void registerMethod(Class<?> type, String methodName, List<Class<?>> methodParameterTypes) throws NoSuchMethodException {
+    public void registerMethod(Class<?> type, String methodName, List<Class<?>> methodParameterTypes, boolean queriedOnly) throws NoSuchMethodException {
         Class<?>[] parameterTypesArray = methodParameterTypes.toArray(new Class<?>[0]);
         Method method;
         try {
@@ -155,13 +153,17 @@ public class ReflectionRegistryAdapter implements ReflectionConfigurationParserD
                 throw e;
             }
         }
-        registry.register(method);
+        registerExecutable(queriedOnly, method);
     }
 
     @Override
-    public void registerConstructor(Class<?> clazz, List<Class<?>> methodParameterTypes) throws NoSuchMethodException {
+    public void registerConstructor(Class<?> clazz, List<Class<?>> methodParameterTypes, boolean queriedOnly) throws NoSuchMethodException {
         Class<?>[] parameterTypesArray = methodParameterTypes.toArray(new Class<?>[0]);
-        registry.register(clazz.getDeclaredConstructor(parameterTypesArray));
+        registerExecutable(queriedOnly, clazz.getDeclaredConstructor(parameterTypesArray));
+    }
+
+    private void registerExecutable(boolean queriedOnly, Executable... executable) {
+        registry.register(queriedOnly, executable);
     }
 
     @Override

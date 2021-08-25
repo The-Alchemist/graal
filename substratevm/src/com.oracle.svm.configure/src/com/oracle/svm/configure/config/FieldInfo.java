@@ -24,6 +24,8 @@
  */
 package com.oracle.svm.configure.config;
 
+import com.oracle.svm.configure.config.ConfigurationKind.ConfigurationMemberKind;
+
 public final class FieldInfo {
     private static final FieldInfo[] FINAL_NOT_WRITABLE_CACHE;
     static {

@@ -45,6 +45,7 @@ import org.graalvm.nativeimage.hosted.Feature.DuringAnalysisAccess;
 import org.graalvm.nativeimage.impl.RuntimeReflectionSupport;
 
 import com.oracle.graal.pointsto.meta.AnalysisType;
+import com.oracle.svm.core.SubstrateOptions;
 import com.oracle.svm.core.hub.ClassForNameSupport;
 import com.oracle.svm.core.hub.DynamicHub;
 import com.oracle.svm.core.jdk.RecordSupport;
@@ -69,6 +70,7 @@ public class ReflectionDataBuilder implements RuntimeReflectionSupport {
     private final Set<Class<?>> reflectionClasses = Collections.newSetFromMap(new ConcurrentHashMap<>());
     private final Set<Executable> reflectionMethods = Collections.newSetFromMap(new ConcurrentHashMap<>());
     private final Set<Field> reflectionFields = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    private final Set<Executable> queriedMethods;
 
     /* Keep track of classes already processed for reflection. */
     private final Set<Class<?>> processedClasses = new HashSet<>();
@@ -78,6 +80,7 @@ public class ReflectionDataBuilder implements RuntimeReflectionSupport {
     public ReflectionDataBuilder(FeatureAccessImpl access) {
         arrayReflectionData = getArrayReflectionData();
         accessors = new ReflectionDataAccessors(access);
+        queriedMethods = SubstrateOptions.ConfigureReflectionMetadata.getValue() ? ConcurrentHashMap.newKeySet() : null;
     }
 
     private static DynamicHub.ReflectionData getArrayReflectionData() {
@@ -118,10 +121,13 @@ public class ReflectionDataBuilder implements RuntimeReflectionSupport {
     }
 
     @Override
-    public void register(Executable... methods) {
+    public void register(boolean queriedOnly, Executable... methods) {
         checkNotSealed();
+        if (queriedOnly && !SubstrateOptions.ConfigureReflectionMetadata.getValue()) {
+            throw UserError.abort("Found manual reflection metadata configuration. Please use --configure-reflection-metadata to enable this behavior.");
+        }
         for (Executable method : methods) {
-            if (reflectionMethods.add(method)) {
+            if (queriedOnly ? queriedMethods.add(method) : reflectionMethods.add(method)) {
                 modifiedClasses.add(method.getDeclaringClass());
             }
         }
@@ -177,6 +183,13 @@ public class ReflectionDataBuilder implements RuntimeReflectionSupport {
                      * a result of initializing its reflection data.
                      */
                     continue;
+                }
+                if (access.isReachable(type)) {
+                    /*
+                     * Reflection metadata parsing tries to query classes via Class.forName().
+                     */
+                    ClassForNameSupport.registerClass(originalClass); // TODO not all?
+                    processedClasses.add(originalClass);
                 }
                 if (type.isArray() || enclosingMethodOrConstructor(originalClass) != null) {
                     /*
@@ -436,6 +449,10 @@ public class ReflectionDataBuilder implements RuntimeReflectionSupport {
             }
         }
         return result.toArray(EMPTY_CLASSES);
+    }
+
+    public boolean isQueried(Executable method) {
+        return queriedMethods.contains(method);
     }
 
     static final class ReflectionDataAccessors {

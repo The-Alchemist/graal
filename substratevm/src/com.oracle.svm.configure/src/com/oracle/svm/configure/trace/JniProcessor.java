@@ -31,7 +31,7 @@ import java.util.Map;
 
 import org.graalvm.compiler.phases.common.LazyValue;
 
-import com.oracle.svm.configure.config.ConfigurationMemberKind;
+import com.oracle.svm.configure.config.ConfigurationKind.ConfigurationMemberKind;
 import com.oracle.svm.configure.config.ConfigurationMethod;
 import com.oracle.svm.configure.config.TypeConfiguration;
 

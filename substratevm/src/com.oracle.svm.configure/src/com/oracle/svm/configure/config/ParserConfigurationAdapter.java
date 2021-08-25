@@ -26,6 +26,8 @@ package com.oracle.svm.configure.config;
 
 import java.util.List;
 
+import com.oracle.svm.configure.config.ConfigurationKind.ConfigurationAccessKind;
+import com.oracle.svm.configure.config.ConfigurationKind.ConfigurationMemberKind;
 import com.oracle.svm.core.TypeResult;
 import com.oracle.svm.core.configure.ReflectionConfigurationParserDelegate;
 
@@ -55,25 +57,27 @@ public class ParserConfigurationAdapter implements ReflectionConfigurationParser
     }
 
     @Override
-    public boolean registerAllMethodsWithName(ConfigurationType type, String methodName) {
-        type.addMethodsWithName(methodName, ConfigurationMemberKind.PRESENT);
+    public boolean registerAllMethodsWithName(ConfigurationType type, String methodName, boolean queriedOnly) {
+        type.addMethodsWithName(methodName, ConfigurationMemberKind.PRESENT, queriedOnly ? ConfigurationAccessKind.QUERIED : ConfigurationAccessKind.ACCESSED);
         return true;
     }
 
     @Override
-    public boolean registerAllConstructors(ConfigurationType type) {
-        type.addMethodsWithName(ConfigurationMethod.CONSTRUCTOR_NAME, ConfigurationMemberKind.PRESENT);
+    public boolean registerAllConstructors(ConfigurationType type, boolean queriedOnly) {
+        type.addMethodsWithName(ConfigurationMethod.CONSTRUCTOR_NAME, ConfigurationMemberKind.PRESENT, queriedOnly ? ConfigurationAccessKind.QUERIED : ConfigurationAccessKind.ACCESSED);
         return true;
     }
 
     @Override
-    public void registerMethod(ConfigurationType type, String methodName, List<ConfigurationType> methodParameterTypes) {
-        type.addMethod(methodName, ConfigurationMethod.toInternalParamsSignature(methodParameterTypes), ConfigurationMemberKind.PRESENT);
+    public void registerMethod(ConfigurationType type, String methodName, List<ConfigurationType> methodParameterTypes, boolean queriedOnly) {
+        type.addMethod(methodName, ConfigurationMethod.toInternalParamsSignature(methodParameterTypes), ConfigurationMemberKind.PRESENT,
+                        queriedOnly ? ConfigurationAccessKind.QUERIED : ConfigurationAccessKind.ACCESSED);
     }
 
     @Override
-    public void registerConstructor(ConfigurationType type, List<ConfigurationType> methodParameterTypes) {
-        type.addMethod(ConfigurationMethod.CONSTRUCTOR_NAME, ConfigurationMethod.toInternalParamsSignature(methodParameterTypes), ConfigurationMemberKind.PRESENT);
+    public void registerConstructor(ConfigurationType type, List<ConfigurationType> methodParameterTypes, boolean queriedOnly) {
+        type.addMethod(ConfigurationMethod.CONSTRUCTOR_NAME, ConfigurationMethod.toInternalParamsSignature(methodParameterTypes), ConfigurationMemberKind.PRESENT,
+                        queriedOnly ? ConfigurationAccessKind.QUERIED : ConfigurationAccessKind.ACCESSED);
     }
 
     @Override
@@ -97,23 +101,23 @@ public class ParserConfigurationAdapter implements ReflectionConfigurationParser
     }
 
     @Override
-    public void registerPublicMethods(ConfigurationType type) {
-        type.setAllPublicMethods();
+    public void registerPublicMethods(ConfigurationType type, boolean queriedOnly) {
+        type.setAllPublicMethods(queriedOnly ? ConfigurationAccessKind.QUERIED : ConfigurationAccessKind.ACCESSED);
     }
 
     @Override
-    public void registerDeclaredMethods(ConfigurationType type) {
-        type.setAllDeclaredMethods();
+    public void registerDeclaredMethods(ConfigurationType type, boolean queriedOnly) {
+        type.setAllDeclaredMethods(queriedOnly ? ConfigurationAccessKind.QUERIED : ConfigurationAccessKind.ACCESSED);
     }
 
     @Override
-    public void registerPublicConstructors(ConfigurationType type) {
-        type.setAllPublicConstructors();
+    public void registerPublicConstructors(ConfigurationType type, boolean queriedOnly) {
+        type.setAllPublicConstructors(queriedOnly ? ConfigurationAccessKind.QUERIED : ConfigurationAccessKind.ACCESSED);
     }
 
     @Override
-    public void registerDeclaredConstructors(ConfigurationType type) {
-        type.setAllDeclaredConstructors();
+    public void registerDeclaredConstructors(ConfigurationType type, boolean queriedOnly) {
+        type.setAllDeclaredConstructors(queriedOnly ? ConfigurationAccessKind.QUERIED : ConfigurationAccessKind.ACCESSED);
     }
 
     @Override

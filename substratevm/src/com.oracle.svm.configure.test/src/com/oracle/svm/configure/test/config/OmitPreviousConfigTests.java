@@ -38,7 +38,8 @@ import java.util.function.Predicate;
 import org.junit.Assert;
 import org.junit.Test;
 
-import com.oracle.svm.configure.config.ConfigurationMemberKind;
+import com.oracle.svm.configure.config.ConfigurationKind.ConfigurationMemberKind;
+import com.oracle.svm.configure.config.ConfigurationKind.ConfigurationAccessKind;
 import com.oracle.svm.configure.config.ConfigurationMethod;
 import com.oracle.svm.configure.config.ConfigurationSet;
 import com.oracle.svm.configure.config.ConfigurationType;
@@ -151,10 +152,10 @@ public class OmitPreviousConfigTests {
 
     private static void doTestTypeFlags(TypeConfiguration typeConfig) {
         ConfigurationType flagTestHasDeclaredType = getConfigTypeOrFail(typeConfig, "FlagTestC");
-        Assert.assertTrue(flagTestHasDeclaredType.haveAllDeclaredClasses() || flagTestHasDeclaredType.haveAllDeclaredFields() || flagTestHasDeclaredType.haveAllDeclaredConstructors());
+        Assert.assertTrue(flagTestHasDeclaredType.haveAllDeclaredClasses() || flagTestHasDeclaredType.haveAllDeclaredFields() || flagTestHasDeclaredType.getAllDeclaredConstructors() == ConfigurationAccessKind.ACCESSED);
 
         ConfigurationType flagTestHasPublicType = getConfigTypeOrFail(typeConfig, "FlagTestD");
-        Assert.assertTrue(flagTestHasPublicType.haveAllPublicClasses() || flagTestHasPublicType.haveAllPublicFields() || flagTestHasPublicType.haveAllPublicConstructors());
+        Assert.assertTrue(flagTestHasPublicType.haveAllPublicClasses() || flagTestHasPublicType.haveAllPublicFields() || flagTestHasPublicType.getAllPublicConstructors() == ConfigurationAccessKind.ACCESSED);
     }
 
     private static void doTestFields(TypeConfiguration typeConfig) {
@@ -276,14 +277,14 @@ class TypeMethodsWithFlagsTest {
     void setFlags(ConfigurationType config) {
         if (methodKind.equals(ConfigurationMemberKind.DECLARED) || methodKind.equals(ConfigurationMemberKind.DECLARED_AND_PUBLIC)) {
             config.setAllDeclaredClasses();
-            config.setAllDeclaredConstructors();
-            config.setAllDeclaredMethods();
+            config.setAllDeclaredConstructors(ConfigurationAccessKind.ACCESSED);
+            config.setAllDeclaredMethods(ConfigurationAccessKind.ACCESSED);
             config.setAllDeclaredFields();
         }
         if (methodKind.equals(ConfigurationMemberKind.PUBLIC) || methodKind.equals(ConfigurationMemberKind.DECLARED_AND_PUBLIC)) {
             config.setAllPublicClasses();
-            config.setAllPublicConstructors();
-            config.setAllPublicMethods();
+            config.setAllPublicConstructors(ConfigurationAccessKind.ACCESSED);
+            config.setAllPublicMethods(ConfigurationAccessKind.ACCESSED);
             config.setAllPublicFields();
         }
     }
@@ -301,12 +302,12 @@ class TypeMethodsWithFlagsTest {
             Assert.assertNotNull("Generated configuration type " + name + " does not exist. Has the test code changed?", configurationType);
 
             for (Map.Entry<ConfigurationMethod, ConfigurationMemberKind> methodEntry : methodsThatMustExist.entrySet()) {
-                ConfigurationMemberKind kind = configurationType.getMethodKindIfPresent(methodEntry.getKey());
+                ConfigurationMemberKind kind = configurationType.getMethodKindIfPresent(methodEntry.getKey()).getMemberKind();
                 Assert.assertNotNull("Method " + methodEntry.getKey() + " unexpectedly NOT found in the new configuration.", kind);
                 Assert.assertEquals("Method " + methodEntry.getKey() + " contains a different kind than expected in the new configuration.", kind, methodEntry.getValue());
             }
             for (Map.Entry<ConfigurationMethod, ConfigurationMemberKind> methodEntry : methodsThatMustNotExist.entrySet()) {
-                ConfigurationMemberKind kind = configurationType.getMethodKindIfPresent(methodEntry.getKey());
+                ConfigurationMemberKind kind = configurationType.getMethodKindIfPresent(methodEntry.getKey()).getMemberKind();
                 Assert.assertNull("Method " + methodEntry.getKey() + " unexpectedly found in the new configuration.", kind);
             }
         }
