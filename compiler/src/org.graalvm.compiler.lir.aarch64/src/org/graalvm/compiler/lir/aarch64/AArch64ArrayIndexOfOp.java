@@ -56,7 +56,7 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
 
     private final boolean findTwoConsecutive;
     private final int arrayBaseOffset;
-    private final int elementSize;
+    private final int elementByteSize;
 
     @Def({REG}) protected AllocatableValue resultValue;
     @Alive({REG}) protected AllocatableValue arrayPtrValue;
@@ -72,16 +72,13 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
     @Temp({REG}) protected AllocatableValue vectorTemp2;
     @Temp({REG}) protected AllocatableValue vectorTemp3;
     @Temp({REG}) protected AllocatableValue vectorTemp4;
-    @Temp({REG}) protected AllocatableValue vectorTemp5;
-    @Temp({REG}) protected AllocatableValue vectorTemp6;
-    @Temp({REG}) protected AllocatableValue vectorTemp7;
 
     public AArch64ArrayIndexOfOp(int arrayBaseOffset, JavaKind valueKind, boolean findTwoConsecutive, LIRGeneratorTool tool, AllocatableValue result, AllocatableValue arrayPtr,
                     AllocatableValue arrayLength, AllocatableValue fromIndex,
                     AllocatableValue searchValue) {
         super(TYPE);
         this.arrayBaseOffset = arrayBaseOffset;
-        this.elementSize = getElementSize(valueKind);
+        this.elementByteSize = getElementByteSize(valueKind);
         this.findTwoConsecutive = findTwoConsecutive;
         resultValue = result;
         arrayPtrValue = arrayPtr;
@@ -100,19 +97,31 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
         vectorTemp2 = tool.newVariable(vectorKind);
         vectorTemp3 = tool.newVariable(vectorKind);
         vectorTemp4 = tool.newVariable(vectorKind);
-        vectorTemp5 = tool.newVariable(vectorKind);
-        vectorTemp6 = tool.newVariable(vectorKind);
-        vectorTemp7 = tool.newVariable(vectorKind);
     }
 
-    private static int getElementSize(JavaKind kind) {
+    private static int getElementByteSize(JavaKind kind) {
         switch (kind) {
             case Byte:
                 return 1;
             case Char:
                 return 2;
+            case Int:
+                return 4;
             default:
                 throw GraalError.shouldNotReachHere("Unexpected JavaKind");
+        }
+    }
+
+    private int getShiftSize() {
+        switch (elementByteSize) {
+            case 1:
+                return 0;
+            case 2:
+                return 1;
+            case 4:
+                return 2;
+            default:
+                throw GraalError.shouldNotReachHere();
         }
     }
 
@@ -125,23 +134,13 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
         Label searchByElementLoop = new Label();
         Label end = new Label();
 
-        int shiftSize;
-        switch (elementSize) {
-            case 1:
-                shiftSize = 0;
-                break;
-            case 2:
-                shiftSize = 1;
-                break;
-            default:
-                throw GraalError.shouldNotReachHere();
-        }
+        int shiftSize = getShiftSize();
 
         /*
          * AArch64 comparisons are at minimum 32 bits; since we are comparing against a
          * zero-extended value, searchValue must also be zero-extended.
          */
-        final int memAccessSize = (findTwoConsecutive ? 2 : 1) * elementSize * Byte.SIZE;
+        final int memAccessSize = (findTwoConsecutive ? 2 : 1) * elementByteSize * Byte.SIZE;
         Register searchValue;
         int compareSize;
         if (memAccessSize < 32) {
@@ -186,7 +185,7 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
          * Add elementSize to the curIndex and retry if the end of the search region has not yet
          * been reached, i.e., the curIndex is still < 0.
          */
-        masm.adds(64, curIndex, curIndex, elementSize);
+        masm.adds(64, curIndex, curIndex, elementByteSize);
         masm.branchConditionally(ConditionFlag.MI, searchByElementLoop);
         masm.jmp(end);
 
@@ -202,61 +201,44 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
          * @formatter:off
          *  Chunk-based reading uses the following approach (with example for UTF-16) inspired from [1]. For SIMD implementation, the steps
          *  represent computation applied to one lane of 8 bytes. SIMD version replicates the following steps to all 4 lanes of 8 bytes each.
-         *  1. Fill 8-byte chunk with search character ('searchChar'): 0x000000000000char -> 0xcharcharcharchar
-         *  2. Read and compare string chunk-by-chunk.
-         *   2.1 Store end index at the beginning of the last chunk ('refAddress'). This ensures that we don't read beyond string boundary.
-         *   2.2 String is processed in chunks: the first unaligned chunk (head) -> all 32-byte aligned chunks -> the last unaligned chunk
-         *   of 32 bytes (tail). Transitions between processing an unaligned and aligned chunk repeats char search on overlapping part.
+         *  1. Fill 8-byte chunk with search element ('searchElement'): 0x000000000000elem -> 0xelemelemelemelem
+         *  2. Read and compare array chunk-by-chunk.
+         *   2.1 Store end index at the beginning of the last chunk ('refAddress'). This ensures that we don't read beyond array boundary.
+         *   2.2 Array is processed in chunks: the first unaligned chunk (head) -> all 32-byte aligned chunks -> the last unaligned chunk
+         *   of 32 bytes (tail). Transitions between processing an unaligned and aligned chunk repeats element search on overlapping part.
          *   However, overhead gets smaller with longer strings and compensated by the gains from using larger (32-byte sized) chunks.
-         *   2.3 After processing each chunk, adjust the address 4-byte aligned to read the next chunk. Repeat this step until the last
+         *   2.3 After processing each chunk, adjust the address 32-byte aligned to read the next chunk. Repeat this step until the last
          *   chunk is reached (address of the next chunk >= 'refAddress').
          *   2.4 On reaching the last chunk, reset the address to read the last chunk.
-         *  3. Check each read chunk to see if 'searchChar' is found.
-         *   3.1 XOR read chunk with 0xcharcharcharchar. (e.g., 0x----char-------- XOR 0xcharcharcharchar -> 0x----0000--------)
-         *   Any matching bytes are now 0 and can be detected by using the steps from 3.2 to 3.5 (based on [2]). Here, we set
-         *   the MSB of a UTF-16 char in the chunk that matches 'searchChar'.
-         *   3.2 Subtract 1 from all UTF-16 char in 3.1 above (T1). (0x----0000-------- - 0x0001000100010001 -> 0x----FFFF--------)
-         *   3.3 Except MSB, mask all bits of UTF-16 char in 3.1 (T2). (0x----0000-------- OR 0x7FFF7FFF7FFF7FFF -> 0x----7FFF--------)
-         *   3.4 Calculate T3 = T1 & ~(T2)  (0x----FFFF-------- AND (NOT 0x----7FFF--------) -> 0x0000800000000000, sets Z flag to 0).
-         *   3.5 Steps 3.1 to 3.4 would detect a match in a SIMD lane (of 8 bytes). All the lanes are OR-ed to detect a match in the chunk
-         *   of 32 bytes.
-         *  4. If character is found in a 32-byte chunk then find its position. Use 2-bit representation for each byte to detect the index
-         *     of matching char. Set those bits to '11' if the match is found. Then calculate number zero chars after the matching char to
+         *  3. Check each read chunk to see if 'searchElement' is found.
+         *  4. If element is found in a 32-byte chunk then find its position. Use 2-bit representation for each byte to detect the starting byte offset
+         *     of matching element. Set those bits to '11' if the match is found. Then calculate number zero element after the matching element to
          *     get the position in the chunk.
-         *   4.1 For each lane, set all the bits where the char is found using T4 = cmhi(T3) (0x0000800000000000 -> 0x0000FFFF00000000).
-         *   4.2 AND T4 with magic constant to set 2 bits based on the position of the char in the chunk.
+         *   4.1 AND T4 with magic constant to set 2 bits based on the byte position of the element in the chunk.
          *   T5 = T4 & 0xc000_0300_00c0_0003L (0x0000FFFF00000000 -> 0x0000030000000000)
-         *   4.3 Perform pairwise addition on adjecent elements/chars twice to convert 32-byte to 8-byte representation where each pair of
-         *    bits represents its corresponding char in a chunk. Magic constant sets different bits for each position that ensures the
-         *    pairwise addition would not overflow when consecutive chars are matched as well as preserve the position of matching char.
-         *   4.4 Reverse the bitstream in T5 (0x0000030000000000 -> 0x0000000000c00000)
-         *   4.5 Calculate leading zeros in T5 and divide the count by 2 to get the offset of matching char in a chunk
-         *   4.6 Retrieve the position of 'searchChar' by adding offset within chunk to the index of the chunk.
+         *   4.2 Perform pairwise addition on adjacent elements twice to convert 32-byte to 8-byte representation where each pair of
+         *    bits represents its corresponding byte element in a chunk. Magic constant sets different bits for each position that ensures the
+         *    pairwise addition would not overflow when consecutive elements are matched as well as preserve the position of matching element.
+         *   4.3 Reverse the bitstream in T5 (0x0000030000000000 -> 0x0000000000c00000)
+         *   4.4 Calculate leading zeros in T5 and divide the count by 2 to get the offset of matching element in a chunk
+         *   4.5 Retrieve the position of 'searchElement' by adding offset within chunk to the index of the chunk.
          *
          *  [1] https://github.com/ARM-software/optimized-routines/blob/master/string/aarch64/strchr.S
-         *  [2] https://graphics.stanford.edu/~seander/bithacks.html#ZeroInWord
          * @formatter:on
          * */
 
         Register result = asRegister(resultValue);
         Register arrayLength = asRegister(arrayLengthValue);
         Register fromIndex = asRegister(fromIndexValue);
-        Register searchChar = asRegister(searchValue);
+        Register searchElement = asRegister(searchValue);
         Register currOffset = asRegister(temp2);
         Register endOfString = asRegister(temp3);
         Register refAddress = asRegister(temp4);
         Register chunkToReadAddress = asRegister(temp5);
-        Register bitMask01RegV = asRegister(vectorTemp1);
-        Register bitMask7fRegV = asRegister(vectorTemp2);
-        Register searchCharRegV = asRegister(vectorTemp3);
-        Register chunkPart1RegV = asRegister(vectorTemp4);
-        Register chunkPart2RegV = asRegister(vectorTemp5);
-        Register tmpRegV1 = asRegister(vectorTemp6);
-        Register tmpRegV2 = asRegister(vectorTemp7);
-
-        /* Register aliases */
-        Register magicConstantRegV = tmpRegV1;
-        Register pairwiseSumRegV = tmpRegV1;
+        Register searchElementRegV = asRegister(vectorTemp1);
+        Register chunkPart1RegV = asRegister(vectorTemp2);
+        Register chunkPart2RegV = asRegister(vectorTemp3);
+        Register tmpRegV1 = asRegister(vectorTemp4);
 
         Label matchInChunk = new Label();
         Label searchByChunkLoopHead = new Label();
@@ -264,46 +246,18 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
         Label processTail = new Label();
         Label end = new Label();
 
-        int bitMask01;
-        int bitMask7f;
-        int shiftSize;
-        ElementSize eSize;
+        int shiftSize = getShiftSize();
+        ElementSize eSize = ElementSize.fromSize(elementByteSize * Byte.SIZE);
         /*
-         * Magic constant is used to detect position of the search character in the matching chunk
+         * Magic constant is used to detect byte offset of the starting position of the search
+         * element in the matching chunk.
          */
-        long magicConstant;
-        switch (elementSize) {
-            case 1:
-                bitMask01 = 0x0101;
-                bitMask7f = 0x7f7f;
-                shiftSize = 0;
-                eSize = ElementSize.Byte;
-                magicConstant = 0xc030_0c03_c030_0c03L;
-                break;
-            case 2:
-                bitMask01 = 0x0001;
-                bitMask7f = 0x7fff;
-                shiftSize = 1;
-                eSize = ElementSize.HalfWord;
-                magicConstant = 0xc000_0300_00c0_0003L;
-                break;
-            default:
-                throw GraalError.shouldNotReachHere();
-        }
+        long magicConstant = 0xc030_0c03_c030_0c03L;
 
-        try (ScratchRegister scratchReg1 = masm.getScratchRegister(); ScratchRegister scratchReg2 = masm.getScratchRegister()) {
-            Register bitMask01Reg = scratchReg1.getRegister();
-            Register bitMask7fReg = scratchReg2.getRegister();
-
-            masm.mov(bitMask01Reg, bitMask01);
-            masm.mov(bitMask7fReg, bitMask7f);
-            masm.neon.dupVG(ASIMDSize.FullReg, eSize, bitMask01RegV, bitMask01Reg);
-            masm.neon.dupVG(ASIMDSize.FullReg, eSize, bitMask7fRegV, bitMask7fReg);
-        }
-        /* 1. Duplicate the searchChar to 32-bytes */
-        masm.neon.dupVG(ASIMDSize.FullReg, eSize, searchCharRegV, searchChar);
+        /* 1. Duplicate the searchElement to 16-bytes */
+        masm.neon.dupVG(ASIMDSize.FullReg, eSize, searchElementRegV, searchElement);
         /*
-         * 2.1 Set endOfString pointing to byte next to the last valid char in the string and
+         * 2.1 Set endOfString pointing to byte next to the last valid element in the string and
          * 'refAddress' pointing to the beginning of the last chunk.
          */
         masm.add(64, endOfString, baseAddress, arrayLength, ShiftType.LSL, shiftSize);
@@ -318,27 +272,27 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
         masm.sub(64, currOffset, chunkToReadAddress, baseAddress);
 
         masm.fldp(128, chunkPart1RegV, chunkPart2RegV, AArch64Address.createImmediateAddress(128, AArch64Address.AddressingMode.IMMEDIATE_PAIR_POST_INDEXED, chunkToReadAddress, 32));
-        /* 3. Find searchChar in the 32-byte chunk */
-        masm.neon.eorVVV(ASIMDSize.FullReg, chunkPart1RegV, chunkPart1RegV, searchCharRegV);
-        masm.neon.eorVVV(ASIMDSize.FullReg, chunkPart2RegV, chunkPart2RegV, searchCharRegV);
-        masm.neon.orrVVV(ASIMDSize.FullReg, tmpRegV1, chunkPart1RegV, bitMask7fRegV);
-        masm.neon.orrVVV(ASIMDSize.FullReg, tmpRegV2, chunkPart2RegV, bitMask7fRegV);
-        masm.neon.subVVV(ASIMDSize.FullReg, eSize, chunkPart1RegV, chunkPart1RegV, bitMask01RegV);
-        masm.neon.subVVV(ASIMDSize.FullReg, eSize, chunkPart2RegV, chunkPart2RegV, bitMask01RegV);
-        masm.neon.bicVVV(ASIMDSize.FullReg, chunkPart1RegV, chunkPart1RegV, tmpRegV1);
-        masm.neon.bicVVV(ASIMDSize.FullReg, chunkPart2RegV, chunkPart2RegV, tmpRegV2);
-
-        try (ScratchRegister scratchReg1 = masm.getScratchRegister(); ScratchRegister scratchReg2 = masm.getScratchRegister()) {
-            Register pairwiseSumPart1 = scratchReg1.getRegister();
-            Register pairwiseSumPart2 = scratchReg2.getRegister();
-            masm.neon.orrVVV(ASIMDSize.FullReg, pairwiseSumRegV, chunkPart1RegV, chunkPart2RegV);
-            masm.neon.moveFromIndex(ElementSize.DoubleWord, ElementSize.DoubleWord, pairwiseSumPart1, pairwiseSumRegV, 0);
-            masm.neon.moveFromIndex(ElementSize.DoubleWord, ElementSize.DoubleWord, pairwiseSumPart2, pairwiseSumRegV, 1);
-            masm.orr(64, pairwiseSumPart1, pairwiseSumPart1, pairwiseSumPart2);
-            masm.cbnz(64, pairwiseSumPart1, matchInChunk);
-            masm.bic(64, chunkToReadAddress, chunkToReadAddress, 31);
-            masm.jmp(searchByChunkLoopHead);
+        /* 3. Find searchElement in the 32-byte chunk */
+        masm.neon.cmeqVVV(ASIMDSize.FullReg, eSize, chunkPart1RegV, chunkPart1RegV, searchElementRegV);
+        masm.neon.cmeqVVV(ASIMDSize.FullReg, eSize, chunkPart2RegV, chunkPart2RegV, searchElementRegV);
+        /* Determining if there was a match. */
+        /* Combine two registers into 1 register */
+        masm.neon.orrVVV(ASIMDSize.FullReg, tmpRegV1, chunkPart1RegV, chunkPart2RegV);
+        /* Reduce 128-bit value to 32/64-bit value */
+        if (elementByteSize == 1) {
+            masm.neon.umaxvSV(ASIMDSize.FullReg, ElementSize.Word, tmpRegV1, tmpRegV1);
+        } else {
+            masm.neon.xtnVV(eSize.narrow(), tmpRegV1, tmpRegV1);
         }
+        /* If value != 0, then there was a match somewhere. */
+        try (ScratchRegister scratchReg = masm.getScratchRegister()) {
+            Register matchReg = scratchReg.getRegister();
+            masm.neon.moveFromIndex(ElementSize.DoubleWord, ElementSize.DoubleWord, matchReg, tmpRegV1, 0);
+            masm.cbnz(64, matchReg, matchInChunk);
+        }
+        /* No match; jump to next loop iteration. */
+        masm.bic(64, chunkToReadAddress, chunkToReadAddress, 31);
+        masm.jmp(searchByChunkLoopHead);
 
         masm.bind(processTail);
         masm.cmp(64, chunkToReadAddress, endOfString);
@@ -352,40 +306,38 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
         masm.mov(64, endOfString, chunkToReadAddress);
         masm.jmp(searchByChunkLoopTail);
 
-        /* 4. If the character is found in a 32-byte chunk then find its position. */
+        /* 4. If the element is found in a 32-byte chunk then find its position. */
         masm.bind(matchInChunk);
         /*
-         * 4.1 Set all the bits for the matching char. Currently, the MSB is set for the matching
-         * positions. Thus, the element at matching position is negative and checking if element < 0
-         * would set all the corresponding bits.
-         */
-        masm.neon.cmltZeroVV(ASIMDSize.FullReg, eSize, chunkPart1RegV, chunkPart1RegV);
-        masm.neon.cmltZeroVV(ASIMDSize.FullReg, eSize, chunkPart2RegV, chunkPart2RegV);
-        /*
-         * 4.2 Using the magic constant set 2 bits in the matching byte that represent its position
-         * in the chunk
+         * 4.1 Using the magic constant set 2 bits in the matching byte(s) that represent its
+         * position in the chunk
          */
         try (ScratchRegister scratchReg = masm.getScratchRegister()) {
             Register magicConstantReg = scratchReg.getRegister();
             masm.mov(magicConstantReg, magicConstant);
-            masm.neon.dupVG(ASIMDSize.FullReg, ElementSize.DoubleWord, magicConstantRegV, magicConstantReg);
+            masm.neon.dupVG(ASIMDSize.FullReg, ElementSize.DoubleWord, tmpRegV1, magicConstantReg);
         }
-        masm.neon.andVVV(ASIMDSize.FullReg, chunkPart1RegV, chunkPart1RegV, magicConstantRegV);
-        masm.neon.andVVV(ASIMDSize.FullReg, chunkPart2RegV, chunkPart2RegV, magicConstantRegV);
-        /* 4.3 Convert 32-byte to 8-byte representation, 2 bits per byte. */
-        masm.neon.addpVVV(ASIMDSize.FullReg, eSize, chunkPart1RegV, chunkPart1RegV, chunkPart2RegV);
-        masm.neon.addpVVV(ASIMDSize.FullReg, eSize, chunkPart1RegV, chunkPart1RegV, chunkPart2RegV);
+        masm.neon.andVVV(ASIMDSize.FullReg, chunkPart1RegV, chunkPart1RegV, tmpRegV1);
+        masm.neon.andVVV(ASIMDSize.FullReg, chunkPart2RegV, chunkPart2RegV, tmpRegV1);
+        /* 4.2 Convert 32-byte to 8-byte representation, 2 bits per byte. */
+        /* Reduce from 256 -> 128 bits. */
+        masm.neon.addpVVV(ASIMDSize.FullReg, ElementSize.Byte, chunkPart1RegV, chunkPart1RegV, chunkPart2RegV);
+        /*
+         * Reduce from 128 -> 64 bits. Note tmpRegV1's value doesn't matter; only care about
+         * chunkPart1RegV.
+         */
+        masm.neon.addpVVV(ASIMDSize.FullReg, ElementSize.Byte, chunkPart1RegV, chunkPart1RegV, tmpRegV1);
 
         try (ScratchRegister scratchReg = masm.getScratchRegister()) {
             Register matchPositionReg = scratchReg.getRegister();
-            /* Detect the position of matching char in the chunk */
+            /* Detect the byte starting position of matching element in the chunk. */
             masm.neon.moveFromIndex(ElementSize.DoubleWord, ElementSize.DoubleWord, matchPositionReg, chunkPart1RegV, 0);
             masm.rbit(64, matchPositionReg, matchPositionReg);
             masm.clz(64, matchPositionReg, matchPositionReg);
             masm.add(64, result, currOffset, matchPositionReg, ShiftType.ASR, 1);
         }
         if (shiftSize != 0) {
-            /* Convert byte offset of searchChar to its char index in UTF-16 string */
+            /* Convert byte offset of searchElement to its array index */
             masm.asr(64, result, result, shiftSize);
         }
 
@@ -403,14 +355,11 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
         Label searchByChunk = new Label();
         Label ret = new Label();
 
-        final int chunkSize = 48;
-
         /*
          * @formatter:off
          * The arguments satisfy the following constraints:
          *  1. 0 <= fromIndex <= arrayLength - 1 (or 2 when findTwoConsecutive is true)
          *  2. number of characters in searchChar is 1 (or 2 when findTwoConsecutive is true)
-         *  3. arrayLength - fromIndex >= 2 when findTwoConsecutive is true
          * @formatter:on
         */
         masm.mov(result, -1);   // Return for empty strings
@@ -420,12 +369,13 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
         masm.add(64, baseAddress, asRegister(arrayPtrValue), arrayBaseOffset);
 
         /*
-         * Search element-by-element for small arrays (with search space size of less than 64 bits,
+         * Search element-by-element for small arrays (with search space size of less than 32 bytes,
          * i.e., 4 UTF-16 or 8 Latin1 elements) else search chunk-by-chunk.
          */
         masm.sub(64, searchLength, arrayLength, fromIndex);
         if (!findTwoConsecutive) {
-            masm.compare(64, searchLength, chunkSize / elementSize);
+            int chunkByteSize = 32;
+            masm.compare(64, searchLength, chunkByteSize / elementByteSize);
             masm.branchConditionally(ConditionFlag.GE, searchByChunk);
         }
         emitScalarCode(masm, searchLength, baseAddress);
