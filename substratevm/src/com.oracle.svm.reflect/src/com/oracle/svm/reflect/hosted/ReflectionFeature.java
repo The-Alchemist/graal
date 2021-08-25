@@ -25,6 +25,8 @@
 package com.oracle.svm.reflect.hosted;
 
 import com.oracle.svm.core.configure.ConfigurationFile;
+import com.oracle.svm.core.reflect.RuntimeReflectionConstructors;
+import com.oracle.svm.reflect.target.RuntimeReflectionConstructorsImpl;
 import org.graalvm.compiler.api.replacements.SnippetReflectionProvider;
 import org.graalvm.compiler.nodes.graphbuilderconf.GraphBuilderConfiguration.Plugins;
 import org.graalvm.compiler.phases.util.Providers;
@@ -65,6 +67,7 @@ public final class ReflectionFeature implements GraalFeature {
 
         reflectionData = new ReflectionDataBuilder((FeatureAccessImpl) access);
         ImageSingletons.add(RuntimeReflectionSupport.class, reflectionData);
+        ImageSingletons.add(RuntimeReflectionConstructors.class, new RuntimeReflectionConstructorsImpl());
     }
 
     @Override

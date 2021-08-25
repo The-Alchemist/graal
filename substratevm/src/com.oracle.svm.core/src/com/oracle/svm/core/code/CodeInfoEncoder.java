@@ -26,23 +26,42 @@ package com.oracle.svm.core.code;
 
 import static com.oracle.svm.core.util.VMError.shouldNotReachHere;
 
+import java.lang.annotation.Annotation;
+// Checkstyle: stop
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Executable;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+// Checkstyle: resume
+import java.util.ArrayList;
 import java.util.BitSet;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 
 import org.graalvm.compiler.code.CompilationResult;
 import org.graalvm.compiler.core.common.NumUtil;
+import org.graalvm.compiler.core.common.util.FrequencyEncoder;
 import org.graalvm.compiler.core.common.util.TypeConversion;
 import org.graalvm.compiler.core.common.util.UnsafeArrayTypeWriter;
 import org.graalvm.compiler.options.Option;
 import org.graalvm.nativeimage.ImageSingletons;
+import org.graalvm.nativeimage.impl.RuntimeReflectionSupport;
+import org.graalvm.util.GuardedAnnotationAccess;
 import org.graalvm.word.Pointer;
 import org.graalvm.word.UnsignedWord;
 import org.graalvm.word.WordFactory;
 
 import com.oracle.svm.core.CalleeSavedRegisters;
 import com.oracle.svm.core.ReservedRegisters;
+import com.oracle.svm.core.SubstrateOptions;
+import com.oracle.svm.core.annotate.Uninterruptible;
 import com.oracle.svm.core.c.NonmovableArray;
 import com.oracle.svm.core.c.NonmovableArrays;
+import com.oracle.svm.core.c.NonmovableObjectArray;
 import com.oracle.svm.core.code.FrameInfoQueryResult.ValueInfo;
 import com.oracle.svm.core.code.FrameInfoQueryResult.ValueType;
 import com.oracle.svm.core.config.ConfigurationValues;
@@ -77,6 +96,10 @@ import jdk.vm.ci.code.site.Infopoint;
 import jdk.vm.ci.meta.JavaConstant;
 import jdk.vm.ci.meta.JavaKind;
 import jdk.vm.ci.meta.JavaValue;
+// Checkstyle: stop
+import sun.invoke.util.Wrapper;
+import sun.reflect.annotation.AnnotationType;
+// Checkstyle: resume
 
 public class CodeInfoEncoder {
 
@@ -97,6 +120,53 @@ public class CodeInfoEncoder {
         final Counter virtualObjectsCount = new Counter(group, "Number of virtual objects", "Number of virtual objects encoded");
     }
 
+    public static final class Encoders {
+        final FrequencyEncoder<JavaConstant> objectConstants;
+        final FrequencyEncoder<Class<?>> sourceClasses;
+        final FrequencyEncoder<String> sourceMethodNames;
+        final FrequencyEncoder<String> names;
+
+        private Encoders() {
+            this.objectConstants = FrequencyEncoder.createEqualityEncoder();
+            this.sourceClasses = FrequencyEncoder.createEqualityEncoder();
+            this.sourceMethodNames = FrequencyEncoder.createEqualityEncoder();
+            sourceMethodNames.addObject("<init>");
+            if (FrameInfoDecoder.encodeDebugNames() || FrameInfoDecoder.encodeSourceReferences()) {
+                this.names = FrequencyEncoder.createEqualityEncoder();
+            } else {
+                this.names = null;
+            }
+        }
+
+        private void encodeAllAndInstall(CodeInfo target, ReferenceAdjuster adjuster) {
+            JavaConstant[] encodedJavaConstants = objectConstants.encodeAll(new JavaConstant[objectConstants.getLength()]);
+            Class<?>[] sourceClassesArray = null;
+            String[] sourceMethodNamesArray = null;
+            String[] namesArray = null;
+            final boolean encodeDebugNames = FrameInfoDecoder.encodeDebugNames();
+            if (encodeDebugNames || FrameInfoDecoder.encodeSourceReferences()) {
+                sourceClassesArray = sourceClasses.encodeAll(new Class<?>[sourceClasses.getLength()]);
+                sourceMethodNamesArray = sourceMethodNames.encodeAll(new String[sourceMethodNames.getLength()]);
+            }
+            if (encodeDebugNames) {
+                namesArray = names.encodeAll(new String[names.getLength()]);
+            }
+            install(target, encodedJavaConstants, sourceClassesArray, sourceMethodNamesArray, namesArray, adjuster);
+        }
+
+        @Uninterruptible(reason = "Nonmovable object arrays are not visible to GC until installed in target.")
+        private static void install(CodeInfo target, JavaConstant[] objectConstantsArray, Class<?>[] sourceClassesArray,
+                        String[] sourceMethodNamesArray, String[] namesArray, ReferenceAdjuster adjuster) {
+
+            NonmovableObjectArray<Object> frameInfoObjectConstants = adjuster.copyOfObjectConstantArray(objectConstantsArray);
+            NonmovableObjectArray<Class<?>> frameInfoSourceClasses = (sourceClassesArray != null) ? adjuster.copyOfObjectArray(sourceClassesArray) : NonmovableArrays.nullArray();
+            NonmovableObjectArray<String> frameInfoSourceMethodNames = (sourceMethodNamesArray != null) ? adjuster.copyOfObjectArray(sourceMethodNamesArray) : NonmovableArrays.nullArray();
+            NonmovableObjectArray<String> frameInfoNames = (namesArray != null) ? adjuster.copyOfObjectArray(namesArray) : NonmovableArrays.nullArray();
+
+            CodeInfoAccess.setEncodings(target, frameInfoObjectConstants, frameInfoSourceClasses, frameInfoSourceMethodNames, frameInfoNames);
+        }
+    }
+
     static class IPData {
         protected long ip;
         protected int frameSizeEncoding;
@@ -108,15 +178,23 @@ public class CodeInfoEncoder {
     }
 
     private final TreeMap<Long, IPData> entries;
+    private final Encoders encoders;
     private final FrameInfoEncoder frameInfoEncoder;
+    private final TreeMap<SharedType, Set<Executable>> methodData;
+    private final AnnotationEncoder annotationEncoder;
 
     private NonmovableArray<Byte> codeInfoIndex;
     private NonmovableArray<Byte> codeInfoEncodings;
     private NonmovableArray<Byte> referenceMapEncoding;
+    private NonmovableArray<Byte> methodDataEncoding;
+    private NonmovableArray<Byte> methodDataIndexEncoding;
 
     public CodeInfoEncoder(FrameInfoEncoder.Customization frameInfoCustomization) {
         this.entries = new TreeMap<>();
-        this.frameInfoEncoder = new FrameInfoEncoder(frameInfoCustomization);
+        this.encoders = new Encoders();
+        this.frameInfoEncoder = new FrameInfoEncoder(frameInfoCustomization, encoders);
+        this.methodData = new TreeMap<>(Comparator.comparingLong(t -> t.getHub().getTypeID()));
+        this.annotationEncoder = new AnnotationEncoder();
     }
 
     public static int getEntryOffset(Infopoint infopoint) {
@@ -129,6 +207,16 @@ public class CodeInfoEncoder {
             return offset;
         }
         return -1;
+    }
+
+    @SuppressWarnings("unchecked")
+    public void addClass(Class<?> clazz) {
+        encoders.sourceClasses.addObject(clazz);
+        if (clazz.isAnnotation()) {
+            for (String valueName : AnnotationType.getInstance((Class<? extends Annotation>) clazz).members().keySet()) {
+                encoders.sourceMethodNames.addObject(valueName);
+            }
+        }
     }
 
     public void addMethod(SharedMethod method, CompilationResult compilation, int compilationOffset) {
@@ -173,6 +261,25 @@ public class CodeInfoEncoder {
         ImageSingletons.lookup(Counters.class).codeSize.add(compilation.getTargetCodeSize());
     }
 
+    public void registerMethod(SharedMethod method, Executable reflectMethod) {
+        if (reflectMethod != null && shouldIncludeMethod(reflectMethod)) {
+            if (reflectMethod instanceof Method) {
+                encoders.sourceMethodNames.addObject(reflectMethod.getName());
+            }
+            /* Register string values in annotations */
+            annotationEncoder.registerStrings(GuardedAnnotationAccess.getDeclaredAnnotations(reflectMethod));
+            for (Annotation[] annotations : reflectMethod.getParameterAnnotations()) {
+                annotationEncoder.registerStrings(annotations);
+            }
+            SharedType declaringType = (SharedType) method.getDeclaringClass();
+            methodData.computeIfAbsent(declaringType, t -> new HashSet<>()).add(reflectMethod);
+        }
+    }
+
+    private static boolean shouldIncludeMethod(Executable reflectMethod) {
+        return !SubstrateOptions.ConfigureReflectionMetadata.getValue() || ImageSingletons.lookup(RuntimeReflectionSupport.class).isQueried(reflectMethod);
+    }
+
     private IPData makeEntry(long ip) {
         IPData result = entries.get(ip);
         if (result == null) {
@@ -184,15 +291,17 @@ public class CodeInfoEncoder {
     }
 
     public void encodeAllAndInstall(CodeInfo target, ReferenceAdjuster adjuster) {
+        encoders.encodeAllAndInstall(target, adjuster);
         encodeReferenceMaps();
-        frameInfoEncoder.encodeAllAndInstall(target, adjuster);
+        frameInfoEncoder.encodeAllAndInstall(target);
+        encodeMethodMetadata();
         encodeIPData();
 
         install(target);
     }
 
     private void install(CodeInfo target) {
-        CodeInfoAccess.setCodeInfo(target, codeInfoIndex, codeInfoEncodings, referenceMapEncoding);
+        CodeInfoAccess.setCodeInfo(target, codeInfoIndex, codeInfoEncodings, referenceMapEncoding, methodDataEncoding, methodDataIndexEncoding);
     }
 
     private void encodeReferenceMaps() {
@@ -204,6 +313,82 @@ public class CodeInfoEncoder {
         for (IPData data : entries.values()) {
             data.referenceMapIndex = referenceMapEncoder.lookupEncoding(data.referenceMap);
         }
+    }
+
+    public static final int NO_METHOD_METADATA = -1;
+
+    private void encodeMethodMetadata() {
+        UnsafeArrayTypeWriter dataEncodingBuffer = UnsafeArrayTypeWriter.create(ByteArrayReader.supportsUnalignedMemoryAccess());
+        UnsafeArrayTypeWriter indexEncodingBuffer = UnsafeArrayTypeWriter.create(ByteArrayReader.supportsUnalignedMemoryAccess());
+        long lastTypeID = -1;
+        for (Map.Entry<SharedType, Set<Executable>> entry : methodData.entrySet()) {
+            SharedType declaringType = entry.getKey();
+            Set<Executable> methods = entry.getValue();
+            long typeID = declaringType.getHub().getTypeID();
+            assert typeID > lastTypeID;
+            lastTypeID++;
+            while (lastTypeID < typeID) {
+                indexEncodingBuffer.putS4(NO_METHOD_METADATA);
+                lastTypeID++;
+            }
+            long index = dataEncodingBuffer.getBytesWritten();
+            indexEncodingBuffer.putU4(index);
+            dataEncodingBuffer.putUV(methods.size());
+            for (Executable method : methods) {
+                String name = method instanceof Constructor<?> ? "<init>" : ((Method) method).getName();
+                final int nameIndex = encoders.sourceMethodNames.getIndex(name);
+                dataEncodingBuffer.putSV(nameIndex);
+
+                dataEncodingBuffer.putUV(method.getModifiers());
+
+                Class<?>[] parameterTypes = method.getParameterTypes();
+                dataEncodingBuffer.putUV(parameterTypes.length);
+                for (Class<?> parameterType : parameterTypes) {
+                    final int paramClassIndex = encoders.sourceClasses.getIndex(encoders.sourceClasses.contains(parameterType) ? parameterType : Object.class);
+                    dataEncodingBuffer.putSV(paramClassIndex);
+                }
+
+                Class<?> returnType = method instanceof Constructor<?> ? void.class : ((Method) method).getReturnType();
+                final int returnTypeIndex = encoders.sourceClasses.getIndex(encoders.sourceClasses.contains(returnType) ? returnType : Object.class);
+                dataEncodingBuffer.putSV(returnTypeIndex);
+
+                Class<?>[] exceptionTypes = filterTypes(method.getExceptionTypes());
+                dataEncodingBuffer.putUV(exceptionTypes.length);
+                for (Class<?> exceptionClazz : exceptionTypes) {
+                    final int exceptionClassIndex = encoders.sourceClasses.getIndex(exceptionClazz);
+                    dataEncodingBuffer.putSV(exceptionClassIndex);
+                }
+
+                try {
+                    byte[] annotations = annotationEncoder.encodeAnnotations(GuardedAnnotationAccess.getDeclaredAnnotations(method));
+                    dataEncodingBuffer.putUV(annotations.length);
+                    for (byte b : annotations) {
+                        dataEncodingBuffer.putS1(b);
+                    }
+                    byte[] parameterAnnotations = annotationEncoder.encodeParameterAnnotations(method.getParameterAnnotations());
+                    dataEncodingBuffer.putUV(parameterAnnotations.length);
+                    for (byte b : parameterAnnotations) {
+                        dataEncodingBuffer.putS1(b);
+                    }
+                } catch (IllegalAccessException | InvocationTargetException e) {
+                    throw shouldNotReachHere();
+                }
+            }
+        }
+        methodDataEncoding = NonmovableArrays.createByteArray(TypeConversion.asS4(dataEncodingBuffer.getBytesWritten()));
+        dataEncodingBuffer.toByteBuffer(NonmovableArrays.asByteBuffer(methodDataEncoding));
+        methodDataIndexEncoding = NonmovableArrays.createByteArray(TypeConversion.asS4(indexEncodingBuffer.getBytesWritten()));
+        indexEncodingBuffer.toByteBuffer(NonmovableArrays.asByteBuffer(methodDataIndexEncoding));
+    }
+
+    private Class<?>[] filterTypes(Class<?>[] types) {
+        List<Class<?>> filteredTypes = new ArrayList<>();
+        for (Class<?> type : types) {
+            if (encoders.sourceClasses.contains(type)) {
+                filteredTypes.add(type);
+            }
+        }
+        return filteredTypes.toArray(new Class<?>[0]);
     }
 
     /**
@@ -392,6 +577,281 @@ public class CodeInfoEncoder {
     public boolean verifyFrameInfo(CodeInfo info) {
         frameInfoEncoder.verifyEncoding(info);
         return true;
+    }
+
+    class AnnotationEncoder {
+        boolean checkAnnotations(Annotation[] annotations, Annotation[][] parameterAnnotations) {
+            try {
+                encodeAnnotations(annotations);
+                encodeParameterAnnotations(parameterAnnotations);
+                return true;
+            } catch (Throwable t) {
+                return false;
+            }
+        }
+
+        byte[] encodeAnnotations(Annotation[] annotations) throws InvocationTargetException, IllegalAccessException {
+            UnsafeArrayTypeWriter buf = UnsafeArrayTypeWriter.create(ByteArrayReader.supportsUnalignedMemoryAccess());
+
+            Annotation[] filteredAnnotations = filterAnnotations(annotations);
+            buf.putU2(filteredAnnotations.length);
+            for (Annotation annotation : filteredAnnotations) {
+                encodeAnnotation(buf, annotation);
+            }
+
+            return buf.toArray();
+        }
+
+        byte[] encodeParameterAnnotations(Annotation[][] annotations) throws InvocationTargetException, IllegalAccessException {
+            UnsafeArrayTypeWriter buf = UnsafeArrayTypeWriter.create(ByteArrayReader.supportsUnalignedMemoryAccess());
+
+            buf.putU1(annotations.length);
+            for (Annotation[] parameterAnnotations : annotations) {
+                Annotation[] filteredParameterAnnotations = filterAnnotations(parameterAnnotations);
+                buf.putU2(filteredParameterAnnotations.length);
+                for (Annotation parameterAnnotation : filteredParameterAnnotations) {
+                    encodeAnnotation(buf, parameterAnnotation);
+                }
+            }
+
+            return buf.toArray();
+        }
+
+        void encodeAnnotation(UnsafeArrayTypeWriter buf, Annotation annotation) throws InvocationTargetException, IllegalAccessException {
+            buf.putU2(encoders.sourceClasses.getIndex(annotation.annotationType()));
+            AnnotationType type = AnnotationType.getInstance(annotation.annotationType());
+            buf.putU2(type.members().size());
+            for (Map.Entry<String, Method> entry : type.members().entrySet()) {
+                String memberName = entry.getKey();
+                Method valueAccessor = entry.getValue();
+                buf.putU2(encoders.sourceMethodNames.getIndex(memberName));
+                encodeValue(buf, valueAccessor.invoke(annotation), type.memberTypes().get(memberName));
+            }
+        }
+
+        void encodeValue(UnsafeArrayTypeWriter buf, Object value, Class<?> type) throws InvocationTargetException, IllegalAccessException {
+            buf.putU1(tag(type));
+            if (type.isAnnotation()) {
+                encodeAnnotation(buf, (Annotation) value);
+            } else if (type.isEnum()) {
+                buf.putU2(encoders.sourceClasses.getIndex(type));
+                buf.putU2(encoders.sourceMethodNames.getIndex(((Enum<?>) value).name()));
+            } else if (type.isArray()) {
+                encodeArray(buf, value, type.getComponentType());
+            } else if (type == Class.class) {
+                buf.putU2(encoders.sourceClasses.getIndex((Class<?>) value));
+            } else if (type == String.class) {
+                buf.putU2(encoders.sourceMethodNames.getIndex((String) value));
+            } else if (type.isPrimitive() || Wrapper.isWrapperType(type)) {
+                Wrapper wrapper = type.isPrimitive() ? Wrapper.forPrimitiveType(type) : Wrapper.forWrapperType(type);
+                switch (wrapper) {
+                    case BOOLEAN:
+                        buf.putU1((boolean) value ? 1 : 0);
+                        break;
+                    case BYTE:
+                        buf.putS1((byte) value);
+                        break;
+                    case SHORT:
+                        buf.putS2((short) value);
+                        break;
+                    case CHAR:
+                        buf.putU2((char) value);
+                        break;
+                    case INT:
+                        buf.putS4((int) value);
+                        break;
+                    case LONG:
+                        buf.putS8((long) value);
+                        break;
+                    case FLOAT:
+                        buf.putS4(Float.floatToRawIntBits((float) value));
+                        break;
+                    case DOUBLE:
+                        buf.putS8(Double.doubleToRawLongBits((double) value));
+                        break;
+                    default:
+                        throw shouldNotReachHere();
+                }
+            } else {
+                throw shouldNotReachHere();
+            }
+        }
+
+        void encodeArray(UnsafeArrayTypeWriter buf, Object value, Class<?> componentType) throws InvocationTargetException, IllegalAccessException {
+            if (!componentType.isPrimitive()) {
+                Object[] array = (Object[]) value;
+                buf.putU2(array.length);
+                for (Object val : array) {
+                    encodeValue(buf, val, componentType);
+                }
+            } else if (componentType == boolean.class) {
+                boolean[] array = (boolean[]) value;
+                buf.putU2(array.length);
+                for (boolean val : array) {
+                    encodeValue(buf, val, componentType);
+                }
+            } else if (componentType == byte.class) {
+                byte[] array = (byte[]) value;
+                buf.putU2(array.length);
+                for (byte val : array) {
+                    encodeValue(buf, val, componentType);
+                }
+            } else if (componentType == short.class) {
+                short[] array = (short[]) value;
+                buf.putU2(array.length);
+                for (short val : array) {
+                    encodeValue(buf, val, componentType);
+                }
+            } else if (componentType == char.class) {
+                char[] array = (char[]) value;
+                buf.putU2(array.length);
+                for (char val : array) {
+                    encodeValue(buf, val, componentType);
+                }
+            } else if (componentType == int.class) {
+                int[] array = (int[]) value;
+                buf.putU2(array.length);
+                for (int val : array) {
+                    encodeValue(buf, val, componentType);
+                }
+            } else if (componentType == long.class) {
+                long[] array = (long[]) value;
+                buf.putU2(array.length);
+                for (long val : array) {
+                    encodeValue(buf, val, componentType);
+                }
+            } else if (componentType == float.class) {
+                float[] array = (float[]) value;
+                buf.putU2(array.length);
+                for (float val : array) {
+                    encodeValue(buf, val, componentType);
+                }
+            } else if (componentType == double.class) {
+                double[] array = (double[]) value;
+                buf.putU2(array.length);
+                for (double val : array) {
+                    encodeValue(buf, val, componentType);
+                }
+            }
+        }
+
+        byte tag(Class<?> type) {
+            if (type.isAnnotation()) {
+                return '@';
+            } else if (type.isEnum()) {
+                return 'e';
+            } else if (type.isArray()) {
+                return '[';
+            } else if (type == Class.class) {
+                return 'c';
+            } else if (type == String.class) {
+                return 's';
+            } else if (type.isPrimitive()) {
+                return (byte) Wrapper.forPrimitiveType(type).basicTypeChar();
+            } else if (Wrapper.isWrapperType(type)) {
+                return (byte) Wrapper.forWrapperType(type).basicTypeChar();
+            } else {
+                throw shouldNotReachHere();
+            }
+        }
+
+        private Annotation[] filterAnnotations(Annotation[] annotations) {
+            List<Annotation> filteredAnnotations = new ArrayList<>();
+            for (Annotation annotation : annotations) {
+                Class<? extends Annotation> annotationClass = annotation.annotationType();
+                if (supportedValue(annotationClass, annotation, null)) {
+                    filteredAnnotations.add(annotation);
+                }
+            }
+            return filteredAnnotations.toArray(new Annotation[0]);
+        }
+
+        private void registerStrings(Annotation[] annotations) {
+            for (Annotation annotation : annotations) {
+                List<String> stringValues = new ArrayList<>();
+                if (supportedValue(annotation.annotationType(), annotation, stringValues)) {
+                    for (String stringValue : stringValues) {
+                        encoders.sourceMethodNames.addObject(stringValue);
+                    }
+                }
+            }
+        }
+
+        @SuppressWarnings("unchecked")
+        private boolean supportedValue(Class<?> type, Object value, List<String> stringValues) {
+            if (type.isAnnotation()) {
+                Annotation annotation = (Annotation) value;
+                if (!encoders.sourceClasses.contains(annotation.annotationType())) {
+                    return false;
+                }
+                AnnotationType annotationType = AnnotationType.getInstance((Class<? extends Annotation>) type);
+                for (Map.Entry<String, Class<?>> entry : annotationType.memberTypes().entrySet()) {
+                    String valueName = entry.getKey();
+                    Class<?> valueType = entry.getValue();
+                    try {
+                        Object annotationValue = annotationType.members().get(valueName).invoke(annotation);
+                        if (!supportedValue(valueType, annotationValue, stringValues)) {
+                            return false;
+                        }
+                    } catch (IllegalAccessException | InvocationTargetException e) {
+                        return false;
+                    }
+                }
+            } else if (type.isArray()) {
+                boolean supported = true;
+                Class<?> componentType = type.getComponentType();
+                if (!componentType.isPrimitive()) {
+                    for (Object val : (Object[]) value) {
+                        supported &= supportedValue(componentType, val, stringValues);
+                    }
+                } else if (componentType == boolean.class) {
+                    for (boolean val : (boolean[]) value) {
+                        supported &= supportedValue(componentType, val, stringValues);
+                    }
+                } else if (componentType == byte.class) {
+                    for (byte val : (byte[]) value) {
+                        supported &= supportedValue(componentType, val, stringValues);
+                    }
+                } else if (componentType == short.class) {
+                    for (short val : (short[]) value) {
+                        supported &= supportedValue(componentType, val, stringValues);
+                    }
+                } else if (componentType == char.class) {
+                    for (char val : (char[]) value) {
+                        supported &= supportedValue(componentType, val, stringValues);
+                    }
+                } else if (componentType == int.class) {
+                    for (int val : (int[]) value) {
+                        supported &= supportedValue(componentType, val, stringValues);
+                    }
+                } else if (componentType == long.class) {
+                    for (long val : (long[]) value) {
+                        supported &= supportedValue(componentType, val, stringValues);
+                    }
+                } else if (componentType == float.class) {
+                    for (float val : (float[]) value) {
+                        supported &= supportedValue(componentType, val, stringValues);
+                    }
+                } else if (componentType == double.class) {
+                    for (double val : (double[]) value) {
+                        supported &= supportedValue(componentType, val, stringValues);
+                    }
+                }
+                return supported;
+            } else if (type == Class.class) {
+                return encoders.sourceClasses.contains((Class<?>) value);
+            } else if (type == String.class) {
+                if (stringValues != null) {
+                    stringValues.add((String) value);
+                }
+            } else if (type.isEnum()) {
+                if (stringValues != null) {
+                    stringValues.add(((Enum<?>) value).name());
+                }
+                return encoders.sourceClasses.contains(type);
+            }
+            return true;
+        }
     }
 }
 

@@ -26,7 +26,12 @@ package com.oracle.svm.core.code;
 
 import static com.oracle.svm.core.util.VMError.shouldNotReachHere;
 
-import com.oracle.svm.core.heap.ReferenceMapIndex;
+// Checkstyle: stop
+import java.lang.reflect.Executable;
+// Checkstyle: resume
+
+import com.oracle.svm.core.SubstrateUtil;
+import com.oracle.svm.core.hub.DynamicHub;
 import org.graalvm.compiler.api.replacements.Fold;
 import org.graalvm.compiler.core.common.util.TypeConversion;
 import org.graalvm.compiler.options.Option;
@@ -34,10 +39,16 @@ import org.graalvm.nativeimage.ImageSingletons;
 
 import com.oracle.svm.core.annotate.AlwaysInline;
 import com.oracle.svm.core.annotate.Uninterruptible;
+import com.oracle.svm.core.c.NonmovableArray;
+import com.oracle.svm.core.c.NonmovableArrays;
+import com.oracle.svm.core.heap.ReferenceMapIndex;
+import com.oracle.svm.core.jdk.Target_jdk_internal_reflect_ConstantPool;
 import com.oracle.svm.core.option.HostedOptionKey;
+import com.oracle.svm.core.reflect.RuntimeReflectionConstructors;
 import com.oracle.svm.core.util.ByteArrayReader;
 import com.oracle.svm.core.util.Counter;
 import com.oracle.svm.core.util.NonmovableByteArrayReader;
+import com.oracle.svm.core.util.NonmovableByteArrayTypeReader;
 
 /**
  * Decodes the metadata for compiled code. The data is an encoded byte stream to make it as compact
@@ -490,6 +501,103 @@ public final class CodeInfoDecoder {
     @Fold
     static CodeInfoDecoderCounters counters() {
         return ImageSingletons.lookup(CodeInfoDecoderCounters.class);
+    }
+
+    @Uninterruptible(reason = "needed to acquire tether", calleeMustBe = false)
+    public static Executable[] getMethodMetadata(DynamicHub declaringType) {
+        CodeInfo untetheredInfo = CodeInfoTable.getImageCodeInfo();
+        Object tether = CodeInfoAccess.acquireTether(untetheredInfo);
+        try {
+            CodeInfo info = CodeInfoAccess.convert(untetheredInfo, tether);
+            return getMethodMetadata0(info, declaringType);
+        } finally {
+            CodeInfoAccess.releaseTether(untetheredInfo, tether);
+        }
+    }
+
+    private static Executable[] getMethodMetadata0(CodeInfo info, DynamicHub declaringType) {
+        NonmovableArray<Byte> index = CodeInfoAccess.getMethodReflectionMetadataIndexEncoding(info);
+        NonmovableByteArrayTypeReader indexReader = new NonmovableByteArrayTypeReader(index, 4 * declaringType.getTypeID());
+        int offset = indexReader.getS4();
+        if (offset == CodeInfoEncoder.NO_METHOD_METADATA) {
+            return new Executable[0];
+        }
+        NonmovableArray<Byte> data = CodeInfoAccess.getMethodReflectionMetadataEncoding(info);
+        NonmovableByteArrayTypeReader dataReader = new NonmovableByteArrayTypeReader(data, offset);
+
+        int methodCount = dataReader.getUVInt();
+        Executable[] methods = new Executable[methodCount];
+        for (int i = 0; i < methodCount; ++i) {
+            Class<?> declaringClass = SubstrateUtil.cast(declaringType, Class.class);
+
+            int nameIndex = dataReader.getSVInt();
+            String name = NonmovableArrays.getObject(CodeInfoAccess.getFrameInfoSourceMethodNames(info), nameIndex);
+
+            int modifiers = dataReader.getUVInt();
+
+            int paramCount = dataReader.getUVInt();
+            Class<?>[] paramTypes = new Class<?>[paramCount];
+            for (int j = 0; j < paramCount; ++j) {
+                int paramTypeIndex = dataReader.getSVInt();
+                if (paramTypeIndex == -1) {
+                    paramTypes[j] = null;
+                } else {
+                    paramTypes[j] = NonmovableArrays.getObject(CodeInfoAccess.getFrameInfoSourceClasses(info), paramTypeIndex);
+                }
+            }
+
+            int returnTypeIndex = dataReader.getSVInt();
+            Class<?> returnType = NonmovableArrays.getObject(CodeInfoAccess.getFrameInfoSourceClasses(info), returnTypeIndex);
+
+            int exceptionCount = dataReader.getUVInt();
+            Class<?>[] exceptionTypes = new Class<?>[exceptionCount];
+            for (int j = 0; j < exceptionCount; ++j) {
+                int exceptionTypeIndex = dataReader.getSVInt();
+                if (exceptionTypeIndex == -1) {
+                    exceptionTypes[j] = null;
+                } else {
+                    exceptionTypes[j] = NonmovableArrays.getObject(CodeInfoAccess.getFrameInfoSourceClasses(info), exceptionTypeIndex);
+                }
+            }
+
+            int annotationsLength = dataReader.getUVInt();
+            byte[] annotations = new byte[annotationsLength];
+            for (int j = 0; j < annotationsLength; ++j) {
+                annotations[j] = (byte) dataReader.getS1();
+            }
+
+            int parameterAnnotationsLength = dataReader.getUVInt();
+            byte[] parameterAnnotations = new byte[parameterAnnotationsLength];
+            for (int j = 0; j < parameterAnnotationsLength; ++j) {
+                parameterAnnotations[j] = (byte) dataReader.getS1();
+            }
+
+            if (name.equals("<init>")) {
+                assert returnType == void.class;
+                methods[i] = ImageSingletons.lookup(RuntimeReflectionConstructors.class).newConstructor(declaringClass, paramTypes, exceptionTypes, modifiers, annotations,
+                                parameterAnnotations);
+            } else {
+                methods[i] = ImageSingletons.lookup(RuntimeReflectionConstructors.class).newMethod(declaringClass, name, paramTypes, returnType, exceptionTypes, modifiers,
+                                annotations, parameterAnnotations, null);
+            }
+        }
+        return methods;
+    }
+
+    @Uninterruptible(reason = "needed to acquire tether", calleeMustBe = false)
+    public static Target_jdk_internal_reflect_ConstantPool getMetadataPseudoConstantPool() {
+        UntetheredCodeInfo untetheredInfo = CodeInfoTable.getImageCodeInfo();
+        Object tether = CodeInfoAccess.acquireTether(untetheredInfo);
+        try {
+            CodeInfo info = CodeInfoAccess.convert(untetheredInfo, tether);
+            return newConstantPool(info);
+        } finally {
+            CodeInfoAccess.releaseTether(untetheredInfo, tether);
+        }
+    }
+
+    private static Target_jdk_internal_reflect_ConstantPool newConstantPool(CodeInfo info) {
+        return new Target_jdk_internal_reflect_ConstantPool(info);
     }
 }
 

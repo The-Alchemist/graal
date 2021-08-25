@@ -451,6 +451,7 @@ public class ReflectionDataBuilder implements RuntimeReflectionSupport {
         return result.toArray(EMPTY_CLASSES);
     }
 
+    @Override
     public boolean isQueried(Executable method) {
         return queriedMethods.contains(method);
     }

@@ -50,7 +50,7 @@ public interface ReflectionRegistry {
 
     void register(boolean finalIsWritable, Field... fields);
 
-    default boolean isQueried(Executable method) {
+    default boolean isQueried(@SuppressWarnings("unused") Executable method) {
         return false;
     }
 }

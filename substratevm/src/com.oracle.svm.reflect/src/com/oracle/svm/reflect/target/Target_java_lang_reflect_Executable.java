@@ -42,6 +42,7 @@ import com.oracle.svm.core.annotate.RecomputeFieldValue.Kind;
 import com.oracle.svm.core.annotate.Substitute;
 import com.oracle.svm.core.annotate.TargetClass;
 import com.oracle.svm.core.annotate.TargetElement;
+import com.oracle.svm.core.code.CodeInfoDecoder;
 import com.oracle.svm.core.jdk.JDK8OrEarlier;
 import com.oracle.svm.core.option.SubstrateOptionsParser;
 import com.oracle.svm.core.util.VMError;
@@ -87,6 +88,12 @@ public final class Target_java_lang_reflect_Executable {
     @TargetElement(onlyWith = JDK8OrEarlier.class)
     native Target_java_lang_reflect_Executable getRoot();
 
+    @Alias //
+    native byte[] getAnnotationBytes();
+
+    @Alias //
+    public native Class<?> getDeclaringClass();
+
     @Substitute
     private Parameter[] privateGetParameters() {
         Target_java_lang_reflect_Executable holder = ReflectionHelper.getHolder(this);
@@ -95,21 +102,34 @@ public final class Target_java_lang_reflect_Executable {
 
     @Substitute
     Map<Class<? extends Annotation>, Annotation> declaredAnnotations() {
-        Target_java_lang_reflect_Executable holder = ReflectionHelper.getHolder(this);
-        return ReflectionHelper.requireNonNull(holder.declaredAnnotations, "Annotations must be computed during native image generation");
+        Map<Class<? extends Annotation>, Annotation> declAnnos;
+        if ((declAnnos = declaredAnnotations) == null) {
+            // Checkstyle: stop
+            synchronized (this) {
+                if ((declAnnos = declaredAnnotations) == null) {
+                    Target_java_lang_reflect_Executable holder = ReflectionHelper.getHolder(this);
+                    declAnnos = Target_sun_reflect_annotation_AnnotationParser.parseAnnotations(
+                                    holder.getAnnotationBytes(),
+                                    CodeInfoDecoder.getMetadataPseudoConstantPool(),
+                                    holder.getDeclaringClass());
+                    declaredAnnotations = declAnnos;
+                }
+            }
+            // Checkstyle: resume
+        }
+        return declAnnos;
     }
 
-    @Substitute
-    @SuppressWarnings("unused")
-    Annotation[][] sharedGetParameterAnnotations(Class<?>[] parameterTypes, byte[] annotations) {
-        Target_java_lang_reflect_Executable holder = ReflectionHelper.getHolder(this);
-        return ReflectionHelper.requireNonNull(holder.parameterAnnotations, "Parameter annotations must be computed during native image generation");
-    }
+    @Alias
+    native Annotation[][] sharedGetParameterAnnotations(Class<?>[] parameterTypes, byte[] annotations);
 
     @Substitute
     @SuppressWarnings({"unused", "hiding", "static-method"})
     Annotation[][] parseParameterAnnotations(byte[] parameterAnnotations) {
-        throw VMError.unsupportedFeature("Parameter annotations parsing is not available at run time.");
+        return Target_sun_reflect_annotation_AnnotationParser.parseParameterAnnotations(
+                        parameterAnnotations,
+                        CodeInfoDecoder.getMetadataPseudoConstantPool(),
+                        getDeclaringClass());
     }
 
     @Substitute

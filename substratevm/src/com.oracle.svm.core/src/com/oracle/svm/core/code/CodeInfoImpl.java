@@ -147,6 +147,18 @@ interface CodeInfoImpl extends CodeInfo {
     void setStackReferenceMapEncoding(NonmovableArray<Byte> referenceMapEncoding);
 
     @RawField
+    NonmovableArray<Byte> getMethodReflectionMetadataEncoding();
+
+    @RawField
+    void setMethodReflectionMetadataEncoding(NonmovableArray<Byte> methodDataEncoding);
+
+    @RawField
+    NonmovableArray<Byte> getMethodReflectionMetadataIndexEncoding();
+
+    @RawField
+    void setMethodReflectionMetadataIndexEncoding(NonmovableArray<Byte> methodDataIndexEncoding);
+
+    @RawField
     void setCodeSize(UnsignedWord codeSize);
 
     @RawField

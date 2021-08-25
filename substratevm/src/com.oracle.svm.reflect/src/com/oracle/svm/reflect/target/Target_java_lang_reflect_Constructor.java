@@ -26,9 +26,13 @@ package com.oracle.svm.reflect.target;
 
 // Checkstyle: allow reflection
 
+import static com.oracle.svm.core.annotate.TargetElement.CONSTRUCTOR_NAME;
+
+import java.lang.annotation.Annotation;
 import java.lang.reflect.AnnotatedType;
 import java.lang.reflect.Constructor;
 
+import com.oracle.svm.core.SubstrateUtil;
 import org.graalvm.compiler.serviceprovider.JavaVersionUtil;
 
 import com.oracle.svm.core.annotate.Alias;
@@ -38,6 +42,7 @@ import com.oracle.svm.core.annotate.RecomputeFieldValue.CustomFieldValueComputer
 import com.oracle.svm.core.annotate.RecomputeFieldValue.Kind;
 import com.oracle.svm.core.annotate.Substitute;
 import com.oracle.svm.core.annotate.TargetClass;
+import com.oracle.svm.core.annotate.TargetElement;
 import com.oracle.svm.core.util.VMError;
 import com.oracle.svm.reflect.hosted.ExecutableAccessorComputer;
 
@@ -50,6 +55,10 @@ public final class Target_java_lang_reflect_Constructor {
 
     @Alias ConstructorRepository genericInfo;
 
+    @Alias private Class<?>[] parameterTypes;
+
+    @Alias private byte[] parameterAnnotations;
+
     @Alias //
     @RecomputeFieldValue(kind = Kind.Custom, declClass = ExecutableAccessorComputer.class) //
     Target_jdk_internal_reflect_ConstructorAccessor constructorAccessor;
@@ -58,14 +67,36 @@ public final class Target_java_lang_reflect_Constructor {
     AnnotatedType annotatedReceiverType;
 
     @Alias
+    @TargetElement(name = CONSTRUCTOR_NAME)
+    @SuppressWarnings("hiding")
+    public native void constructor(Class<?> declaringClass,
+                    Class<?>[] parameterTypes,
+                    Class<?>[] checkedExceptions,
+                    int modifiers,
+                    int slot,
+                    String signature,
+                    byte[] annotations,
+                    byte[] parameterAnnotations);
+
+    @Alias
     native Target_java_lang_reflect_Constructor copy();
 
     @Substitute
     Target_jdk_internal_reflect_ConstructorAccessor acquireConstructorAccessor() {
         if (constructorAccessor == null) {
-            throw VMError.unsupportedFeature("Runtime reflection is not supported.");
+            throw VMError.unsupportedFeature("Runtime reflection is not supported for " + this);
         }
         return constructorAccessor;
+    }
+
+    @Substitute
+    public Annotation[][] getParameterAnnotations() {
+        Target_java_lang_reflect_Executable self = SubstrateUtil.cast(this, Target_java_lang_reflect_Executable.class);
+        Target_java_lang_reflect_Executable holder = ReflectionHelper.getHolder(self);
+        if (holder.parameterAnnotations != null) {
+            return holder.parameterAnnotations;
+        }
+        return self.sharedGetParameterAnnotations(parameterTypes, parameterAnnotations);
     }
 
     @Substitute

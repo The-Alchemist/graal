@@ -309,6 +309,8 @@ public final class RuntimeCodeInfoAccess {
         action.apply(impl.getCodeInfoIndex());
         action.apply(impl.getCodeInfoEncodings());
         action.apply(impl.getStackReferenceMapEncoding());
+        action.apply(impl.getMethodReflectionMetadataEncoding());
+        action.apply(impl.getMethodReflectionMetadataIndexEncoding());
         action.apply(impl.getFrameInfoEncodings());
         action.apply(impl.getDeoptimizationStartOffsets());
         action.apply(impl.getDeoptimizationEncodings());

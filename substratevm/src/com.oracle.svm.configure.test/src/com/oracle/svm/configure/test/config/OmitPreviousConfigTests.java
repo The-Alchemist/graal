@@ -38,8 +38,9 @@ import java.util.function.Predicate;
 import org.junit.Assert;
 import org.junit.Test;
 
-import com.oracle.svm.configure.config.ConfigurationKind.ConfigurationMemberKind;
+import com.oracle.svm.configure.config.ConfigurationKind;
 import com.oracle.svm.configure.config.ConfigurationKind.ConfigurationAccessKind;
+import com.oracle.svm.configure.config.ConfigurationKind.ConfigurationMemberKind;
 import com.oracle.svm.configure.config.ConfigurationMethod;
 import com.oracle.svm.configure.config.ConfigurationSet;
 import com.oracle.svm.configure.config.ConfigurationType;
@@ -307,7 +308,7 @@ class TypeMethodsWithFlagsTest {
                 Assert.assertEquals("Method " + methodEntry.getKey() + " contains a different kind than expected in the new configuration.", kind, methodEntry.getValue());
             }
             for (Map.Entry<ConfigurationMethod, ConfigurationMemberKind> methodEntry : methodsThatMustNotExist.entrySet()) {
-                ConfigurationMemberKind kind = configurationType.getMethodKindIfPresent(methodEntry.getKey()).getMemberKind();
+                ConfigurationKind kind = configurationType.getMethodKindIfPresent(methodEntry.getKey());
                 Assert.assertNull("Method " + methodEntry.getKey() + " unexpectedly found in the new configuration.", kind);
             }
         }

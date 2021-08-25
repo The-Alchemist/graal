@@ -31,8 +31,8 @@ import java.util.Objects;
 import java.util.stream.Stream;
 
 import org.graalvm.collections.EconomicSet;
-import org.graalvm.nativeimage.hosted.Feature;
 import org.graalvm.nativeimage.ImageSingletons;
+import org.graalvm.nativeimage.hosted.Feature;
 
 import com.oracle.graal.pointsto.meta.AnalysisType;
 import com.oracle.graal.pointsto.meta.AnalysisUniverse;
@@ -58,6 +58,7 @@ public class AnnotationTypeFeature implements Feature {
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public void duringAnalysis(DuringAnalysisAccess access) {
         DuringAnalysisAccessImpl accessImpl = (DuringAnalysisAccessImpl) access;
         AnalysisUniverse universe = accessImpl.getUniverse();
@@ -79,6 +80,16 @@ public class AnnotationTypeFeature implements Feature {
         Stream<AnnotatedElement> allElements = Stream.concat(Stream.concat(universe.getFields().stream(), universe.getMethods().stream()), universe.getTypes().stream());
         Stream<AnnotatedElement> newElements = allElements.filter(visitedElements::add);
         newElements.forEach(this::reportAnnotation);
+
+        /*
+         * Parsing annotation data in reflection classes requires being able to instantiate all
+         * annotation types at runtime.
+         */
+        universe.getTypes().stream()
+                        .filter(AnalysisType::isAnnotation)
+                        .filter(AnalysisType::isReachable)
+                        .map(type -> (Class<? extends Annotation>) universe.lookup(type.getWrapped()).getJavaClass())
+                        .forEach(annotation -> ImageSingletons.lookup(AnnotationTypeSupport.class).createInstance(annotation));
     }
 
     private void reportAnnotation(AnnotatedElement element) {
