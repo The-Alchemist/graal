@@ -137,7 +137,7 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
 
         /*
          * AArch64 comparisons are at minimum 32 bits; since we are comparing against a
-         * zero-extended value, searchValue must also be zero-extended.
+         * zero-extended value, the searchValue must also be zero-extended.
          */
         final int memAccessSize = (findTwoConsecutive ? 2 : 1) * elementByteSize * Byte.SIZE;
         Register searchValueReg;
@@ -175,6 +175,7 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
         Register curIndex = searchLength;
         masm.sub(64, curIndex, zr, curIndex, ShiftType.LSL, shiftSize);
         /* Loop doing element-by-element search */
+        masm.align(32);
         masm.bind(searchByElementLoop);
         masm.ldr(memAccessSize, curValue, AArch64Address.createRegisterOffsetAddress(memAccessSize, baseAddress, curIndex, false));
         masm.cmp(compareSize, searchValueReg, curValue);
@@ -264,6 +265,7 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
         /* Set 'chunkToReadAddress' pointing to the chunk from where the search begins. */
         masm.add(64, chunkToReadAddress, baseAddress, fromIndex, ShiftType.LSL, shiftSize);
 
+        masm.align(32);
         masm.bind(searchByChunkLoopHead);
         masm.cmp(64, refAddress, chunkToReadAddress);
         masm.branchConditionally(ConditionFlag.LE, processTail);
