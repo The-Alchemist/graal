@@ -74,8 +74,7 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
     @Temp({REG}) protected AllocatableValue vectorTemp4;
 
     public AArch64ArrayIndexOfOp(int arrayBaseOffset, JavaKind valueKind, boolean findTwoConsecutive, LIRGeneratorTool tool, AllocatableValue result, AllocatableValue arrayPtr,
-                    AllocatableValue arrayLength, AllocatableValue fromIndex,
-                    AllocatableValue searchValue) {
+                    AllocatableValue arrayLength, AllocatableValue fromIndex, AllocatableValue searchValue) {
         super(TYPE);
         this.arrayBaseOffset = arrayBaseOffset;
         this.elementByteSize = getElementByteSize(valueKind);
@@ -141,15 +140,15 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
          * zero-extended value, searchValue must also be zero-extended.
          */
         final int memAccessSize = (findTwoConsecutive ? 2 : 1) * elementByteSize * Byte.SIZE;
-        Register searchValue;
+        Register searchValueReg;
         int compareSize;
         if (memAccessSize < 32) {
             compareSize = 32;
-            searchValue = asRegister(temp4);
-            masm.and(32, searchValue, asRegister(this.searchValue), NumUtil.getNbitNumberLong(memAccessSize));
+            searchValueReg = asRegister(temp4);
+            masm.and(32, searchValueReg, asRegister(searchValue), NumUtil.getNbitNumberLong(memAccessSize));
         } else {
             compareSize = memAccessSize;
-            searchValue = asRegister(this.searchValue);
+            searchValueReg = asRegister(searchValue);
         }
 
         /*
@@ -161,10 +160,10 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
             /* The end of the region is the second to last element in the array */
             endIndex = asRegister(temp5);
             masm.sub(64, endIndex, arrayLength, 1);
-            /* adjust search length accordingly */
+            /* Adjust search length accordingly */
             masm.sub(64, searchLength, searchLength, 1);
         } else {
-            /* the end of the region is the last element in the array */
+            /* The end of the region is the last element in the array */
             endIndex = arrayLength;
         }
         /*
@@ -178,7 +177,7 @@ public final class AArch64ArrayIndexOfOp extends AArch64LIRInstruction {
         /* Loop doing element-by-element search */
         masm.bind(searchByElementLoop);
         masm.ldr(memAccessSize, curValue, AArch64Address.createRegisterOffsetAddress(memAccessSize, baseAddress, curIndex, false));
-        masm.cmp(compareSize, searchValue, curValue);
+        masm.cmp(compareSize, searchValueReg, curValue);
         masm.branchConditionally(ConditionFlag.EQ, match);
 
         /*
