@@ -106,11 +106,8 @@ final class TruffleJDKServices {
 
     static boolean verifyModuleVisibility(Object module, Class<?> memberClass) {
         Module lookupModule = (Module) module;
+        assert lookupModule != null;
         if (lookupModule == null) {
-            /*
-             * This case may currently happen in AOT as the module support there is not complete.
-             * See GR-19155.
-             */
             return true;
         }
         Module memberModule = memberClass.getModule();
